@@ -119,18 +119,38 @@ func (p *Plugin) OnActivate() error {
 	// Initialize the secret store
 	p.secretStore = store.NewKVSecretStore(p.API)
 
-	// Register the bot account
-	bot := &model.Bot{
-		Username:    "secrets-bot",
-		DisplayName: "Secrets Bot",
-		Description: "A bot account for the Secrets plugin",
-	}
+	// Define bot user
+	botUsername := "secrets-bot"
+	botDisplayName := "Secrets Bot"
+	botDescription := "A bot account for the Secrets plugin"
 
-	botUser, err := p.API.CreateBot(bot)
+	// Try to find the existing bot
+	bot, err := p.API.GetUserByUsername(botUsername)
 	if err != nil {
-		return errors.Wrap(err, "failed to create bot account")
+		// Bot doesn't exist yet, create it
+		botUser, createErr := p.API.CreateBot(&model.Bot{
+			Username:    botUsername,
+			DisplayName: botDisplayName,
+			Description: botDescription,
+		})
+		if createErr != nil {
+			// If we can't create because it exists, try to get it again
+			if strings.Contains(createErr.Error(), "store.sql_bot.save.exists.app_error") {
+				existingBot, getErr := p.API.GetUserByUsername(botUsername)
+				if getErr != nil {
+					return errors.Wrap(getErr, "failed to get existing bot")
+				}
+				p.botID = existingBot.Id
+			} else {
+				return errors.Wrap(createErr, "failed to create bot account")
+			}
+		} else {
+			p.botID = botUser.UserId
+		}
+	} else {
+		// Bot exists, use it
+		p.botID = bot.Id
 	}
-	p.botID = botUser.UserId
 
 	// Register the slash command
 	if err := p.API.RegisterCommand(&model.Command{
