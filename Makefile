@@ -17,6 +17,9 @@ all: dist
 
 dist: build
 	mkdir -p dist
+	# Make Linux and macOS binaries executable
+	chmod +x build/server/dist/plugin-linux-amd64
+	chmod +x build/server/dist/plugin-darwin-amd64
 	cd build && tar -czf ../dist/$(BUNDLE_NAME) .
 
 build: server webapp

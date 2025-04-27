@@ -99,26 +99,18 @@ func (p *Plugin) handleSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create the post with the secret placeholder
+	// Create the post with the custom post type
 	post := &model.Post{
 		UserId:    p.botID,
 		ChannelId: req.ChannelID,
 		RootId:    req.RootId,
+		Type:      "custom_secret",
 		Props: map[string]interface{}{
+			"secret_id": secret.ID,
 			"attachments": []*model.SlackAttachment{
 				{
 					Title: "Secret Message",
-					Text:  fmt.Sprintf("@%s has sent a secret message. Click to view it once.", user.Username),
-					Actions: []*model.PostAction{
-						{
-							Id:   model.NewId(),
-							Name: "View Secret",
-							Type: "button",
-							Integration: &model.PostActionIntegration{
-								URL: fmt.Sprintf("/plugins/com.mattermost.secrets-plugin/api/v1/secrets/view?secret_id=%s", secret.ID),
-							},
-						},
-					},
+					Text:  fmt.Sprintf("@%s has sent a secret message.", user.Username),
 				},
 			},
 		},
@@ -157,8 +149,22 @@ func (p *Plugin) handleSecretViewed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// First retrieve the secret object
+	secret, err := p.secretStore.GetSecret(req.SecretID)
+	if err != nil {
+		p.API.LogError("Failed to get secret", "error", err.Error())
+		http.Error(w, "Failed to get secret", http.StatusInternalServerError)
+		return
+	}
+
+	if secret == nil {
+		p.API.LogWarn("Secret not found", "secret_id", req.SecretID)
+		http.Error(w, "Secret not found", http.StatusNotFound)
+		return
+	}
+
 	// Mark the secret as viewed by this user
-	if err := p.markSecretAsViewed(req.SecretID, userID); err != nil {
+	if err := p.markSecretAsViewed(secret, userID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -168,223 +174,164 @@ func (p *Plugin) handleSecretViewed(w http.ResponseWriter, r *http.Request) {
 
 // handleViewSecret handles requests when a user clicks the View Secret button
 func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
+	secretID := r.URL.Query().Get("secret_id")
+	if secretID == "" {
+		p.API.LogWarn("No secret ID provided to view secret endpoint")
+		http.Error(w, "No secret ID provided", http.StatusBadRequest)
+		return
+	}
+
 	userID := r.Header.Get("Mattermost-User-Id")
 	if userID == "" {
+		p.API.LogWarn("No user ID found in request to view secret")
 		http.Error(w, "Not authorized", http.StatusUnauthorized)
 		return
 	}
 
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// For button actions, we need to parse the form values
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to parse form: %s", err.Error()), http.StatusBadRequest)
-		return
-	}
-
-	// Get the secret ID from the query parameters
-	secretID := r.URL.Query().Get("secret_id")
-	if secretID == "" {
-		http.Error(w, "Secret ID is required", http.StatusBadRequest)
-		return
-	}
-
-	// Get the secret
 	secret, err := p.secretStore.GetSecret(secretID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to get secret: %s", err.Error()), http.StatusInternalServerError)
+		p.API.LogError("Failed to get secret", "error", err.Error())
+		http.Error(w, "Failed to get secret", http.StatusInternalServerError)
 		return
 	}
 
 	if secret == nil {
+		p.API.LogWarn("Secret not found", "secret_id", secretID)
 		http.Error(w, "Secret not found", http.StatusNotFound)
 		return
 	}
 
-	// Check if the secret has expired
-	if secret.ExpiresAt > 0 && secret.ExpiresAt < models.GetMillis() {
-		// Secret has expired, delete it
-		if err := p.secretStore.DeleteSecret(secretID); err != nil {
-			p.API.LogError("Failed to delete expired secret", "secret_id", secretID, "error", err.Error())
-		}
-
-		// Return an error response
-		http.Error(w, "Secret has expired", http.StatusGone)
+	// Add this user to the ViewedBy list
+	err = p.markSecretAsViewed(secret, userID)
+	if err != nil {
+		p.API.LogError("Failed to mark secret as viewed", "error", err.Error())
+		http.Error(w, "Failed to mark secret as viewed", http.StatusInternalServerError)
 		return
 	}
 
-	// Check if the user has already viewed this secret
-	userViewed := false
-	for _, id := range secret.ViewedBy {
-		if id == userID {
-			userViewed = true
-			break
-		}
+	// Send an ephemeral post directly to the user
+	ephemeralPost := &model.Post{
+		UserId:    p.botID,
+		ChannelId: secret.ChannelID,
+		Message:   "**Secret Message**:\n```\n" + secret.Message + "\n```",
 	}
 
-	// If the user hasn't viewed it yet, mark it as viewed
-	if !userViewed {
-		if err := p.markSecretAsViewed(secretID, userID); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to mark secret as viewed: %s", err.Error()), http.StatusInternalServerError)
+	p.API.SendEphemeralPost(userID, ephemeralPost)
+
+	p.API.LogDebug("Sending ephemeral message with secret content",
+		"secret_id", secretID,
+		"user_id", userID,
+		"channel_id", secret.ChannelID)
+
+	// Also send a response for the integration
+	response := &model.PostActionIntegrationResponse{}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		p.API.LogError("Failed to encode response", "error", err.Error())
+		http.Error(w, "Failed to create response", http.StatusInternalServerError)
+		return
+	}
+}
+
+// maybeCleanupSecret checks if a secret should be cleaned up and handles it if needed
+func (p *Plugin) maybeCleanupSecret(secret *models.Secret) {
+	// Get channel members
+	var memberCount int
+
+	// Check if this is a DM/GM channel
+	channel, appErr := p.API.GetChannel(secret.ChannelID)
+	if appErr != nil {
+		p.API.LogError("Failed to get channel", "channel_id", secret.ChannelID, "error", appErr.Error())
+		return
+	}
+
+	// Check channel type
+	if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
+		// For DMs, just count the channel members
+		stats, appErr := p.API.GetChannelStats(secret.ChannelID)
+		if appErr != nil {
+			p.API.LogError("Failed to get channel stats", "channel_id", secret.ChannelID, "error", appErr.Error())
 			return
 		}
-	}
-
-	// Get the user who created the secret for display purposes
-	user, appErr := p.API.GetUser(secret.UserID)
-	var username string
-	if appErr != nil {
-		p.API.LogError("Failed to get user", "error", appErr.Error())
-		username = "Unknown User"
+		memberCount = int(stats.MemberCount)
 	} else {
-		username = user.Username
+		// For regular channels, get total member count
+		stats, appErr := p.API.GetChannelStats(secret.ChannelID)
+		if appErr != nil {
+			p.API.LogError("Failed to get channel stats", "channel_id", secret.ChannelID, "error", appErr.Error())
+			return
+		}
+		memberCount = int(stats.MemberCount)
 	}
 
-	// Check if this is a "close" action
-	closeAction := r.URL.Query().Get("action") == "close"
-	if closeAction {
-		// Extract the post ID from the context
-		postID := r.URL.Query().Get("post_id")
-		if postID == "" {
-			postID = "unknown_post_id" // Fallback if post_id is missing
+	// No point keeping track if we couldn't determine membership
+	if memberCount == 0 {
+		memberCount = 10 // Default to a reasonable number
+	}
+
+	// Calculate threshold for considering the secret fully viewed
+	viewThreshold := memberCount
+
+	p.API.LogDebug("Checking secret cleanup status",
+		"secret_id", secret.ID,
+		"viewed_by_count", len(secret.ViewedBy),
+		"member_count", memberCount,
+		"view_threshold", viewThreshold)
+
+	// Check if we've reached the threshold
+	if len(secret.ViewedBy) >= viewThreshold {
+		p.API.LogDebug("Secret has been viewed by all members, cleaning up", "secret_id", secret.ID)
+
+		// All members have viewed the secret, clean it up
+		if err := p.secretStore.DeleteSecret(secret.ID); err != nil {
+			p.API.LogError("Failed to delete viewed secret", "secret_id", secret.ID, "error", err.Error())
 		}
 
-		// Create a response that replaces the message for this user with a simple acknowledgment
-		update := &model.PostActionIntegrationResponse{
-			Update: &model.Post{
-				Id: postID,
-				Props: map[string]interface{}{
-					"attachments": []*model.SlackAttachment{
-						{
-							Title: "Secret Message",
-							Text:  "This secret message has been closed.",
-							Color: "#DDDDDD",
-						},
-					},
-				},
-			},
-			EphemeralText: "You've closed this secret message.",
-		}
+		// Try to find and delete the post too
+		p.deletePostBySecretID(secret.ID, secret.ChannelID)
+	}
+}
 
-		// Return the update that replaces the message
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(update); err != nil {
-			p.API.LogError("Failed to write JSON response", "error", err.Error())
-		}
+// deletePostBySecretID finds and deletes a post associated with a secret
+func (p *Plugin) deletePostBySecretID(secretID, channelID string) {
+	posts, appErr := p.API.GetPostsForChannel(channelID, 0, 100)
+	if appErr != nil {
+		p.API.LogError("Failed to get posts for channel", "channel_id", channelID, "error", appErr.Error())
 		return
 	}
 
-	// Construct actions for the response
-	actions := []*model.PostAction{
-		{
-			Id:   model.NewId(),
-			Name: "Close",
-			Type: "button",
-			Integration: &model.PostActionIntegration{
-				URL: fmt.Sprintf("/plugins/com.mattermost.secrets-plugin/api/v1/secrets/view?secret_id=%s&action=close&post_id=${post.id}", secret.ID),
-			},
-		},
-	}
-
-	// Construct a proper update to show the secret
-	update := &model.PostActionIntegrationResponse{
-		Update: &model.Post{
-			Props: map[string]interface{}{
-				"attachments": []*model.SlackAttachment{
-					{
-						Title: "Secret Message",
-						Text:  fmt.Sprintf("**From @%s:**\n\n```\n%s\n```", username, secret.Message),
-						Fields: []*model.SlackAttachmentField{
-							{
-								Title: "Status",
-								Value: "This message can only be viewed once per person. It will be automatically deleted when everyone in the channel has viewed it or when it expires.",
-								Short: false,
-							},
-						},
-						Actions: actions,
-					},
-				},
-			},
-		},
-	}
-
-	// Check if all users have viewed the secret
-	// For channels with many members, we'll consider it fully viewed after 75% of members have seen it
-	go func() {
-		// Get channel members
-		var memberCount int
-
-		// Check if this is a DM/GM channel
-		channel, appErr := p.API.GetChannel(secret.ChannelID)
-		if appErr != nil {
-			p.API.LogError("Failed to get channel", "channel_id", secret.ChannelID, "error", appErr.Error())
-		} else {
-			// Check channel type
-			if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
-				// For DMs, just count the channel members
-				stats, appErr := p.API.GetChannelStats(secret.ChannelID)
-				if appErr != nil {
-					p.API.LogError("Failed to get channel stats", "channel_id", secret.ChannelID, "error", appErr.Error())
-				} else {
-					memberCount = int(stats.MemberCount)
+	for _, post := range posts.Posts {
+		secretIDFromPost, ok := post.Props["secret_id"].(string)
+		if ok && secretIDFromPost == secretID {
+			// Found the post with our secret ID
+			p.API.LogDebug("Found post for secret, deleting", "post_id", post.Id, "secret_id", secretID)
+			time.AfterFunc(5*time.Second, func() {
+				if appErr := p.API.DeletePost(post.Id); appErr != nil {
+					p.API.LogError("Failed to delete post for viewed secret", "post_id", post.Id, "error", appErr.Error())
 				}
-			} else {
-				// For regular channels, get total member count
-				stats, appErr := p.API.GetChannelStats(secret.ChannelID)
-				if appErr != nil {
-					p.API.LogError("Failed to get channel stats", "channel_id", secret.ChannelID, "error", appErr.Error())
-				} else {
-					memberCount = int(stats.MemberCount)
-				}
-			}
+			})
+			return
 		}
 
-		// No point keeping track if we couldn't determine membership
-		if memberCount == 0 {
-			memberCount = 10 // Default to a reasonable number
-		}
-
-		// Calculate threshold for considering the secret fully viewed
-		// Always require 100% of members to view the secret
-		viewThreshold := memberCount
-
-		// Check if we've reached the threshold
-		if len(secret.ViewedBy) >= viewThreshold {
-			// All members have viewed the secret, clean it up
-			if err := p.secretStore.DeleteSecret(secret.ID); err != nil {
-				p.API.LogError("Failed to delete viewed secret", "secret_id", secret.ID, "error", err.Error())
-			}
-
-			// Try to delete the post too
-			posts, appErr := p.API.GetPostsForChannel(secret.ChannelID, 0, 100)
-			if appErr != nil {
-				p.API.LogError("Failed to get posts for channel", "channel_id", secret.ChannelID, "error", appErr.Error())
-				return
-			}
-
-			// Try to find the post containing this secret
-			for _, post := range posts.Posts {
-				if attachments, ok := post.Props["attachments"].([]interface{}); ok {
-					for _, attachment := range attachments {
-						if attach, ok := attachment.(map[string]interface{}); ok {
-							if actions, ok := attach["actions"].([]interface{}); ok {
-								for _, action := range actions {
-									if act, ok := action.(map[string]interface{}); ok {
-										if integration, ok := act["integration"].(map[string]interface{}); ok {
-											url, ok := integration["url"].(string)
-											if ok && strings.Contains(url, secret.ID) {
-												// Found the post, delete it after a delay
-												time.AfterFunc(5*time.Second, func() {
-													if appErr := p.API.DeletePost(post.Id); appErr != nil {
-														p.API.LogError("Failed to delete post for viewed secret", "post_id", post.Id, "error", appErr.Error())
-													}
-												})
-												break
+		// Check for the old style post with button actions
+		if attachments, ok := post.Props["attachments"].([]interface{}); ok {
+			for _, attachment := range attachments {
+				if attach, ok := attachment.(map[string]interface{}); ok {
+					if actions, ok := attach["actions"].([]interface{}); ok {
+						for _, action := range actions {
+							if act, ok := action.(map[string]interface{}); ok {
+								if integration, ok := act["integration"].(map[string]interface{}); ok {
+									url, ok := integration["url"].(string)
+									if ok && strings.Contains(url, secretID) {
+										// Found the post, delete it after a delay
+										p.API.LogDebug("Found post with action for secret, deleting", "post_id", post.Id, "secret_id", secretID)
+										time.AfterFunc(5*time.Second, func() {
+											if appErr := p.API.DeletePost(post.Id); appErr != nil {
+												p.API.LogError("Failed to delete post for viewed secret", "post_id", post.Id, "error", appErr.Error())
 											}
-										}
+										})
+										return
 									}
 								}
 							}
@@ -393,12 +340,6 @@ func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-	}()
-
-	// Return the dialog that shows the secret
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(update); err != nil {
-		p.API.LogError("Failed to write JSON response", "error", err.Error())
 	}
 }
 
@@ -617,26 +558,18 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		}, nil
 	}
 
-	// Create the post with the secret placeholder
+	// Create the post with the custom post type
 	post := &model.Post{
 		UserId:    p.botID,
 		ChannelId: args.ChannelId,
 		RootId:    args.RootId,
+		Type:      "custom_secret",
 		Props: map[string]interface{}{
+			"secret_id": secret.ID,
 			"attachments": []*model.SlackAttachment{
 				{
 					Title: "Secret Message",
-					Text:  fmt.Sprintf("@%s has sent a secret message. Click to view it once.", user.Username),
-					Actions: []*model.PostAction{
-						{
-							Id:   model.NewId(),
-							Name: "View Secret",
-							Type: "button",
-							Integration: &model.PostActionIntegration{
-								URL: fmt.Sprintf("/plugins/com.mattermost.secrets-plugin/api/v1/secrets/view?secret_id=%s", secret.ID),
-							},
-						},
-					},
+					Text:  fmt.Sprintf("@%s has sent a secret message.", user.Username),
 				},
 			},
 		},
@@ -680,30 +613,31 @@ func (p *Plugin) createSecret(userID, channelID, message string, rootID string) 
 }
 
 // markSecretAsViewed marks a secret as viewed by a user
-func (p *Plugin) markSecretAsViewed(secretID, userID string) error {
-	// Get the secret
-	secret, err := p.secretStore.GetSecret(secretID)
-	if err != nil {
-		return errors.Wrap(err, "failed to get secret")
-	}
-
-	if secret == nil {
-		return errors.New("secret not found")
-	}
+func (p *Plugin) markSecretAsViewed(secret *models.Secret, userID string) error {
+	p.API.LogDebug("Marking secret as viewed", "secret_id", secret.ID, "user_id", userID)
 
 	// Check if the user has already viewed the secret
+	userAlreadyViewed := false
 	for _, id := range secret.ViewedBy {
 		if id == userID {
+			userAlreadyViewed = true
+			p.API.LogDebug("User has already viewed this secret", "user_id", userID, "secret_id", secret.ID)
 			return nil // User has already viewed this secret
 		}
 	}
 
-	// Mark as viewed by this user
-	secret.ViewedBy = append(secret.ViewedBy, userID)
+	if !userAlreadyViewed {
+		// Mark as viewed by this user
+		p.API.LogDebug("Adding user to ViewedBy list", "user_id", userID, "secret_id", secret.ID, "current_viewed_count", len(secret.ViewedBy))
+		secret.ViewedBy = append(secret.ViewedBy, userID)
 
-	// Save the updated secret
-	if err := p.secretStore.SaveSecret(secret); err != nil {
-		return errors.Wrap(err, "failed to update secret")
+		// Save the updated secret
+		if err := p.secretStore.SaveSecret(secret); err != nil {
+			p.API.LogError("Failed to save secret after marking as viewed", "secret_id", secret.ID, "error", err.Error())
+			return errors.Wrap(err, "failed to update secret")
+		}
+
+		p.API.LogDebug("Successfully marked secret as viewed", "user_id", userID, "secret_id", secret.ID, "viewed_count", len(secret.ViewedBy))
 	}
 
 	return nil
