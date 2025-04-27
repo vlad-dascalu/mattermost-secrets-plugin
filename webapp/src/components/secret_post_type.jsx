@@ -18,13 +18,27 @@ export default class SecretPostType extends React.PureComponent {
         const viewedKey = `secret_viewed_${secretId}`;
         const viewedData = localStorage.getItem(viewedKey);
         const viewed = viewedData !== null;
+        
+        // Check if the secret is marked as expired
+        const expired = props.post.props && props.post.props.expired === true;
 
         this.state = {
             error: null,
             loading: false,
             viewed: viewed,
             viewedAt: viewedData ? parseInt(viewedData, 10) : null,
+            expired: expired,
         };
+    }
+
+    componentDidUpdate(prevProps) {
+        // Check if the post props have changed (e.g., expired flag was updated by the server)
+        if (prevProps.post.props !== this.props.post.props) {
+            const expired = this.props.post.props && this.props.post.props.expired === true;
+            if (expired !== this.state.expired) {
+                this.setState({ expired });
+            }
+        }
     }
 
     viewSecret = async (secretId) => {
@@ -51,19 +65,27 @@ export default class SecretPostType extends React.PureComponent {
                 console.error(`Failed to view secret: ${errorMessage}`);
                 throw new Error(`Failed to fetch secret: ${errorMessage}`);
             }
-
-            // Mark this secret as viewed in localStorage so it persists across refreshes
-            const viewedAt = Date.now();
-            localStorage.setItem(`secret_viewed_${secretId}`, viewedAt.toString());
-
-            // The server handles displaying the secret in an ephemeral message
-            this.setState({
-                loading: false,
-                viewed: true,
-                viewedAt: viewedAt,
-            });
             
-            console.log('Secret viewed successfully, ephemeral message should appear above this post');
+            // Mark this secret as viewed in localStorage so it persists across refreshes
+            // Only mark it as viewed if it hasn't expired
+            if (!responseData.ephemeralText || !responseData.ephemeralText.includes('expired')) {
+                const viewedAt = Date.now();
+                localStorage.setItem(`secret_viewed_${secretId}`, viewedAt.toString());
+                
+                this.setState({
+                    loading: false,
+                    viewed: true,
+                    viewedAt: viewedAt,
+                });
+            } else {
+                // If the response indicates the secret expired, update our state
+                this.setState({
+                    loading: false,
+                    expired: true,
+                });
+            }
+            
+            console.log('Secret view request processed, check for ephemeral messages');
         } catch (error) {
             console.error('Error viewing secret:', error);
             this.setState({
@@ -75,7 +97,7 @@ export default class SecretPostType extends React.PureComponent {
 
     render() {
         const {post, theme} = this.props;
-        const {error, loading, viewed, viewedAt} = this.state;
+        const {error, loading, viewed, viewedAt, expired} = this.state;
 
         // Extract the secret ID from the post props
         const secretId = post.props && post.props.secret_id;
@@ -116,7 +138,7 @@ export default class SecretPostType extends React.PureComponent {
                 }}
             >
                 <div className='SecretPostType__header'>
-                    <i className='icon fa fa-lock' style={{color: theme.linkColor}}/>
+                    <i className='icon fa fa-lock' style={{color: expired ? '#AAAAAA' : theme.linkColor}}/>
                     <span style={{marginLeft: '8px', fontWeight: 'bold'}}>Secret Message</span>
                 </div>
                 <div 
@@ -126,7 +148,12 @@ export default class SecretPostType extends React.PureComponent {
                         marginTop: '8px',
                     }}
                 >
-                    {viewed ? (
+                    {expired ? (
+                        <div>
+                            <p style={{fontWeight: 'bold', color: '#AAAAAA'}}>This secret has expired and is no longer available.</p>
+                            <p style={{color: '#AAAAAA'}}>The secret might have expired due to time limit or has been deleted by the sender.</p>
+                        </div>
+                    ) : viewed ? (
                         <div>
                             <p style={{fontWeight: 'bold'}}>You have already viewed this secret message.</p>
                             <p>This secret can only be viewed once per user.</p>

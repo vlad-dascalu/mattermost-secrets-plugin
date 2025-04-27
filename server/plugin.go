@@ -201,6 +201,34 @@ func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if the secret has expired
+	currentTime := models.GetMillis()
+	if secret.ExpiresAt <= currentTime {
+		p.API.LogDebug("Attempted to view expired secret", "secret_id", secretID, "user_id", userID)
+
+		// Send an ephemeral post to the user indicating the secret has expired
+		expiredPost := &model.Post{
+			UserId:    p.botID,
+			ChannelId: secret.ChannelID,
+			Message:   "**This secret has expired and is no longer available.**",
+		}
+		p.API.SendEphemeralPost(userID, expiredPost)
+
+		// Update the post to show it's expired
+		p.updatePostForExpiredSecret(secret)
+
+		// Send a response for the integration
+		response := &model.PostActionIntegrationResponse{
+			EphemeralText: "Secret has expired.",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			p.API.LogError("Failed to encode response", "error", err.Error())
+		}
+		return
+	}
+
 	// Add this user to the ViewedBy list
 	err = p.markSecretAsViewed(secret, userID)
 	if err != nil {
@@ -369,6 +397,24 @@ func (p *Plugin) handleCloseSecret(w http.ResponseWriter, r *http.Request) {
 		postID = "unknown_post_id" // Fallback if post_id is missing
 	}
 
+	// Check if the secret exists and if it has expired
+	secret, err := p.secretStore.GetSecret(secretID)
+	if err != nil {
+		p.API.LogError("Failed to get secret", "error", err.Error())
+		http.Error(w, "Failed to get secret", http.StatusInternalServerError)
+		return
+	}
+
+	// Prepare message based on whether the secret exists and is expired
+	message := "This secret message has been closed."
+	color := "#DDDDDD"
+
+	if secret == nil {
+		message = "This secret message is no longer available."
+	} else if secret.ExpiresAt <= models.GetMillis() {
+		message = "This secret message has expired and is no longer available."
+	}
+
 	// Create a response that replaces the message for this user with a simple acknowledgment
 	response := &model.PostActionIntegrationResponse{
 		Update: &model.Post{
@@ -377,8 +423,8 @@ func (p *Plugin) handleCloseSecret(w http.ResponseWriter, r *http.Request) {
 				"attachments": []*model.SlackAttachment{
 					{
 						Title: "Secret Message",
-						Text:  "This secret message has been closed.",
-						Color: "#DDDDDD",
+						Text:  message,
+						Color: color,
 					},
 				},
 			},
@@ -476,41 +522,12 @@ func (p *Plugin) cleanupExpiredSecrets() {
 	for _, secret := range secrets {
 		// Check if the secret has expired
 		if secret.ExpiresAt <= currentTime {
-			p.API.LogDebug("Deleting expired secret", "secret_id", secret.ID)
+			p.API.LogDebug("Found expired secret during cleanup", "secret_id", secret.ID)
 
-			// Delete the post if we can find it
-			posts, appErr := p.API.GetPostsForChannel(secret.ChannelID, 0, 100)
-			if appErr != nil {
-				p.API.LogError("Failed to get posts for channel", "channel_id", secret.ChannelID, "error", appErr.Error())
-			} else {
-				// Try to find the post containing this secret
-				for _, post := range posts.Posts {
-					if attachments, ok := post.Props["attachments"].([]interface{}); ok {
-						for _, attachment := range attachments {
-							if attach, ok := attachment.(map[string]interface{}); ok {
-								if actions, ok := attach["actions"].([]interface{}); ok {
-									for _, action := range actions {
-										if act, ok := action.(map[string]interface{}); ok {
-											if integration, ok := act["integration"].(map[string]interface{}); ok {
-												url, ok := integration["url"].(string)
-												if ok && strings.Contains(url, secret.ID) {
-													// Found the post, delete it
-													if appErr := p.API.DeletePost(post.Id); appErr != nil {
-														p.API.LogError("Failed to delete post for expired secret", "post_id", post.Id, "error", appErr.Error())
-													}
-													break
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+			// First update the post to show it's expired
+			p.updatePostForExpiredSecret(secret)
 
-			// Delete the secret
+			// Then delete the secret
 			if err := p.secretStore.DeleteSecret(secret.ID); err != nil {
 				p.API.LogError("Failed to delete expired secret", "secret_id", secret.ID, "error", err.Error())
 			}
@@ -657,6 +674,93 @@ func (p *Plugin) writeJSON(w http.ResponseWriter, v interface{}) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		p.API.LogError("Failed to write JSON response", "error", err.Error())
 	}
+}
+
+// updatePostForExpiredSecret updates the UI of a post containing an expired secret
+func (p *Plugin) updatePostForExpiredSecret(secret *models.Secret) {
+	posts, appErr := p.API.GetPostsForChannel(secret.ChannelID, 0, 100)
+	if appErr != nil {
+		p.API.LogError("Failed to get posts for channel", "channel_id", secret.ChannelID, "error", appErr.Error())
+		return
+	}
+
+	for _, post := range posts.Posts {
+		secretIDFromPost, ok := post.Props["secret_id"].(string)
+		if ok && secretIDFromPost == secret.ID {
+			// Found the post with our secret ID
+			p.API.LogDebug("Found post for expired secret, updating UI", "post_id", post.Id, "secret_id", secret.ID)
+
+			// Update the post to indicate the secret has expired
+			updatedPost := post.Clone()
+			updatedPost.Props["expired"] = true
+
+			// Update attachments to show expiration message instead of the original message
+			if attachments, ok := updatedPost.Props["attachments"].([]interface{}); ok && len(attachments) > 0 {
+				if attach, ok := attachments[0].(map[string]interface{}); ok {
+					attach["text"] = "This secret message has expired and is no longer available."
+					attach["color"] = "#DDDDDD" // Gray color to indicate expiration
+
+					// Remove any actions that might have been present
+					delete(attach, "actions")
+
+					attachments[0] = attach
+					updatedPost.Props["attachments"] = attachments
+				}
+			}
+
+			if _, err := p.API.UpdatePost(updatedPost); err != nil {
+				p.API.LogError("Failed to update post for expired secret", "post_id", post.Id, "error", err.Error())
+			}
+			return
+		}
+
+		// Check for the old style post with button actions
+		if attachments, ok := post.Props["attachments"].([]interface{}); ok {
+			for i, attachment := range attachments {
+				if attach, ok := attachment.(map[string]interface{}); ok {
+					if actions, ok := attach["actions"].([]interface{}); ok {
+						for _, action := range actions {
+							if act, ok := action.(map[string]interface{}); ok {
+								if integration, ok := act["integration"].(map[string]interface{}); ok {
+									url, ok := integration["url"].(string)
+									if ok && strings.Contains(url, secret.ID) {
+										// Found the post, update it
+										p.API.LogDebug("Found post with action for expired secret, updating", "post_id", post.Id, "secret_id", secret.ID)
+
+										updatedPost := post.Clone()
+										updatedAttachments := make([]interface{}, len(attachments))
+										copy(updatedAttachments, attachments)
+
+										// Update this specific attachment
+										updatedAttach := map[string]interface{}{}
+										for k, v := range attach {
+											updatedAttach[k] = v
+										}
+
+										// Remove actions and update text
+										delete(updatedAttach, "actions")
+										updatedAttach["text"] = "This secret message has expired and is no longer available."
+										updatedAttach["color"] = "#DDDDDD" // Gray color
+
+										updatedAttachments[i] = updatedAttach
+										updatedPost.Props["attachments"] = updatedAttachments
+										updatedPost.Props["expired"] = true
+
+										if _, err := p.API.UpdatePost(updatedPost); err != nil {
+											p.API.LogError("Failed to update post for expired secret", "post_id", post.Id, "error", err.Error())
+										}
+										return
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	p.API.LogDebug("Could not find post for expired secret to update", "secret_id", secret.ID)
 }
 
 // This function needs to be defined for our plugin to be started
