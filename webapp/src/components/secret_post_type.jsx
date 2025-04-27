@@ -21,7 +21,7 @@ export default class SecretPostType extends React.PureComponent {
         
         // Check if the secret is marked as expired
         const expired = props.post.props && props.post.props.expired === true;
-
+        
         this.state = {
             error: null,
             loading: false,
@@ -125,7 +125,7 @@ export default class SecretPostType extends React.PureComponent {
                 </div>
             );
         }
-
+        
         return (
             <div 
                 className='SecretPostType__container'
@@ -151,15 +151,14 @@ export default class SecretPostType extends React.PureComponent {
                     {expired ? (
                         <div>
                             <p style={{fontWeight: 'bold', color: '#AAAAAA'}}>This secret has expired and is no longer available.</p>
-                            <p style={{color: '#AAAAAA'}}>The secret might have expired due to time limit or has been deleted by the sender.</p>
+                            <p style={{color: '#AAAAAA'}}>The secret might have expired due to time limit.</p>
                         </div>
                     ) : viewed ? (
                         <div>
                             <p style={{fontWeight: 'bold'}}>You have already viewed this secret message.</p>
                             <p>This secret can only be viewed once per user.</p>
                             <p style={{fontStyle: 'italic', color: '#888'}}>
-                                The secret content was shown in a temporary message that should 
-                                disappear when you navigate away from this channel.
+                                The secret content was shown in a temporary message that will expire or disappear when you refresh the page or application.
                             </p>
                             {viewedAt && (
                                 <p style={{fontSize: '12px', color: theme.centerChannelColor, fontStyle: 'italic'}}>
@@ -170,7 +169,7 @@ export default class SecretPostType extends React.PureComponent {
                     ) : (
                         <>
                             <p>This message contains a secret. View it once, then it disappears.</p>
-                            <p><em>The secret will be shown only to you in a temporary message that will disappear when you navigate to another channel.</em></p>
+                            <p><em>The secret will be shown only to you in a temporary message that will disappear when it expires or when you refresh the page or application.</em></p>
                             <button 
                                 className='btn btn-primary'
                                 onClick={() => this.viewSecret(secretId)}
