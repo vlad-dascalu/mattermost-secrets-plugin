@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,23 +19,22 @@ import (
 
 func setupTestPlugin(t *testing.T, mockSecretStore store.SecretStore) *Plugin {
 	t.Helper()
-	
+
 	mockAPI := &plugintest.API{}
-	
+
 	mockAPI.On("LogError", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("LogWarn", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("LogInfo", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	mockAPI.On("LogDebug", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	
+
 	p := &Plugin{}
 	p.SetAPI(mockAPI)
 	p.secretStore = mockSecretStore
-	
+
 	p.setConfiguration(&configuration{
-		SecretExpiryTime:     24,
-		AllowCopyToClipboard: true,
+		SecretExpiryTime: 24,
 	})
-	
+
 	return p
 }
 
@@ -144,28 +142,27 @@ func TestPlugin_ExecuteCommand(t *testing.T) {
 			mockAPI.On("LogWarn", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			mockAPI.On("LogInfo", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			mockAPI.On("LogDebug", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			
+
 			// Apply any additional API mocks
 			tt.mockAPI(mockAPI)
-			
+
 			p := &Plugin{}
 			p.SetAPI(mockAPI)
 			p.secretStore = tt.mockStore()
 			p.botID = "bot1"
-			
+
 			p.setConfiguration(&configuration{
-				SecretExpiryTime:     24,
-				AllowCopyToClipboard: true,
+				SecretExpiryTime: 24,
 			})
-			
+
 			resp, err := p.ExecuteCommand(&plugin.Context{}, tt.commandArgs)
-			
+
 			if tt.expectedError {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-			
+
 			assert.Equal(t, tt.expectedResp, resp)
 		})
 	}
@@ -263,20 +260,20 @@ func TestPlugin_HandleSecret(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := setupTestPlugin(t, tt.mockStore())
-			
+
 			req, err := http.NewRequest(tt.method, "/api/v1/secrets", strings.NewReader(tt.body))
 			assert.NoError(t, err)
-			
+
 			if tt.userID != "" {
 				req.Header.Set("Mattermost-User-Id", tt.userID)
 			}
 			req.Header.Set("Content-Type", "application/json")
-			
+
 			w := httptest.NewRecorder()
 			p.handleSecret(w, req)
-			
+
 			assert.Equal(t, tt.expectedStatusCode, w.Code)
-			
+
 			if tt.expectedBody != "" {
 				assert.Contains(t, w.Body.String(), tt.expectedBody)
 			}
@@ -301,15 +298,15 @@ func TestPlugin_MarkSecretAsViewed(t *testing.T) {
 			existingViews: []string{},
 			mockStore: func(secretID string, existingViews []string) store.SecretStore {
 				mockStore := &MockSecretStore{}
-				
+
 				secret := &models.Secret{
 					ID:       secretID,
 					ViewedBy: existingViews,
 				}
-				
+
 				// First GetSecret call
 				mockStore.On("GetSecret", secretID).Return(secret, nil)
-				
+
 				// SaveSecret call should include user1 in ViewedBy
 				expectedSecret := &models.Secret{
 					ID:       secretID,
@@ -320,16 +317,16 @@ func TestPlugin_MarkSecretAsViewed(t *testing.T) {
 					if len(s.ViewedBy) != len(expectedSecret.ViewedBy) {
 						return false
 					}
-					
+
 					for i, id := range s.ViewedBy {
 						if id != expectedSecret.ViewedBy[i] {
 							return false
 						}
 					}
-					
+
 					return s.ID == expectedSecret.ID
 				})).Return(nil)
-				
+
 				return mockStore
 			},
 			expectedError: false,
@@ -341,15 +338,15 @@ func TestPlugin_MarkSecretAsViewed(t *testing.T) {
 			existingViews: []string{"user1"},
 			mockStore: func(secretID string, existingViews []string) store.SecretStore {
 				mockStore := &MockSecretStore{}
-				
+
 				secret := &models.Secret{
 					ID:       secretID,
 					ViewedBy: existingViews,
 				}
-				
+
 				// GetSecret call
 				mockStore.On("GetSecret", secretID).Return(secret, nil)
-				
+
 				return mockStore
 			},
 			expectedError: false,
@@ -361,10 +358,10 @@ func TestPlugin_MarkSecretAsViewed(t *testing.T) {
 			existingViews: []string{},
 			mockStore: func(secretID string, existingViews []string) store.SecretStore {
 				mockStore := &MockSecretStore{}
-				
+
 				// GetSecret call - not found
 				mockStore.On("GetSecret", secretID).Return(nil, nil)
-				
+
 				return mockStore
 			},
 			expectedError: true,
@@ -376,10 +373,10 @@ func TestPlugin_MarkSecretAsViewed(t *testing.T) {
 			existingViews: []string{},
 			mockStore: func(secretID string, existingViews []string) store.SecretStore {
 				mockStore := &MockSecretStore{}
-				
+
 				// GetSecret call - error
 				mockStore.On("GetSecret", secretID).Return(nil, errors.New("test error"))
-				
+
 				return mockStore
 			},
 			expectedError: true,
@@ -391,18 +388,18 @@ func TestPlugin_MarkSecretAsViewed(t *testing.T) {
 			existingViews: []string{},
 			mockStore: func(secretID string, existingViews []string) store.SecretStore {
 				mockStore := &MockSecretStore{}
-				
+
 				secret := &models.Secret{
 					ID:       secretID,
 					ViewedBy: existingViews,
 				}
-				
+
 				// GetSecret call
 				mockStore.On("GetSecret", secretID).Return(secret, nil)
-				
+
 				// SaveSecret call - error
 				mockStore.On("SaveSecret", mock.AnythingOfType("*models.Secret")).Return(errors.New("test error"))
-				
+
 				return mockStore
 			},
 			expectedError: true,
@@ -412,9 +409,9 @@ func TestPlugin_MarkSecretAsViewed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := setupTestPlugin(t, tt.mockStore(tt.secretID, tt.existingViews))
-			
+
 			err := p.markSecretAsViewed(tt.secretID, tt.userID)
-			
+
 			if tt.expectedError {
 				assert.Error(t, err)
 			} else {
@@ -436,11 +433,11 @@ func (m *MockSecretStore) SaveSecret(secret *models.Secret) error {
 
 func (m *MockSecretStore) GetSecret(id string) (*models.Secret, error) {
 	args := m.Called(id)
-	
+
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	
+
 	return args.Get(0).(*models.Secret), args.Error(1)
 }
 
@@ -451,10 +448,10 @@ func (m *MockSecretStore) DeleteSecret(id string) error {
 
 func (m *MockSecretStore) ListExpiredSecrets() ([]*models.Secret, error) {
 	args := m.Called()
-	
+
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	
+
 	return args.Get(0).([]*models.Secret), args.Error(1)
-} 
+}

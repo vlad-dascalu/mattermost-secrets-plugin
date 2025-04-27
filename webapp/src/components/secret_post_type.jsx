@@ -188,7 +188,16 @@ export default class SecretPostType extends React.PureComponent {
                         whiteSpace: 'pre-wrap',
                     }}
                 >
-                    {secret.message}
+                    <pre style={{
+                        backgroundColor: `${theme.centerChannelColor}20`,
+                        padding: '12px',
+                        borderRadius: '4px',
+                        margin: '0',
+                        overflowX: 'auto',
+                        fontFamily: 'monospace'
+                    }}>
+                        <code>{secret.message}</code>
+                    </pre>
                 </div>
                 <div 
                     className='SecretPostType__footer'

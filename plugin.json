@@ -24,19 +24,11 @@
         "settings": [
             {
                 "key": "SecretExpiryTime",
-                "display_name": "Secret Expiry Time (hours)",
+                "display_name": "Secret Expiry Time (minutes)",
                 "type": "number",
-                "help_text": "The number of hours after which an unviewed secret will expire.",
-                "placeholder": "24",
-                "default": 24
-            },
-            {
-                "key": "AllowCopyToClipboard",
-                "display_name": "Allow Copy to Clipboard",
-                "type": "bool",
-                "help_text": "Whether users can copy the secret to clipboard when viewing.",
-                "placeholder": "",
-                "default": true
+                "help_text": "The number of minutes after which an unviewed secret will expire.",
+                "placeholder": "60",
+                "default": 60
             }
         ]
     }

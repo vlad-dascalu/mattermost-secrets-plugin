@@ -14,8 +14,7 @@ import (
 //
 // See https://developers.mattermost.com/extend/plugins/server/reference/
 type configuration struct {
-	SecretExpiryTime     int  `json:"SecretExpiryTime"`
-	AllowCopyToClipboard bool `json:"AllowCopyToClipboard"`
+	SecretExpiryTime int `json:"SecretExpiryTime"`
 }
 
 // Clone deep copies the configuration

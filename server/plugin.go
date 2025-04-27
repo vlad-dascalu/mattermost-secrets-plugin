@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
@@ -42,6 +43,8 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 		p.handleSecretViewed(w, r)
 	case "/api/v1/secrets/view":
 		p.handleViewSecret(w, r)
+	case "/api/v1/secrets/close":
+		p.handleCloseSecret(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -154,10 +157,33 @@ func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark the secret as viewed
-	if err := p.markSecretAsViewed(secretID, userID); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to mark secret as viewed: %s", err.Error()), http.StatusInternalServerError)
+	// Check if the secret has expired
+	if secret.ExpiresAt > 0 && secret.ExpiresAt < models.GetMillis() {
+		// Secret has expired, delete it
+		if err := p.secretStore.DeleteSecret(secretID); err != nil {
+			p.API.LogError("Failed to delete expired secret", "secret_id", secretID, "error", err.Error())
+		}
+
+		// Return an error response
+		http.Error(w, "Secret has expired", http.StatusGone)
 		return
+	}
+
+	// Check if the user has already viewed this secret
+	userViewed := false
+	for _, id := range secret.ViewedBy {
+		if id == userID {
+			userViewed = true
+			break
+		}
+	}
+
+	// If the user hasn't viewed it yet, mark it as viewed
+	if !userViewed {
+		if err := p.markSecretAsViewed(secretID, userID); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to mark secret as viewed: %s", err.Error()), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Get the user who created the secret for display purposes
@@ -170,6 +196,52 @@ func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
 		username = user.Username
 	}
 
+	// Check if this is a "close" action
+	closeAction := r.URL.Query().Get("action") == "close"
+	if closeAction {
+		// Extract the post ID from the context
+		postID := r.URL.Query().Get("post_id")
+		if postID == "" {
+			postID = "unknown_post_id" // Fallback if post_id is missing
+		}
+
+		// Create a response that replaces the message for this user with a simple acknowledgment
+		update := &model.PostActionIntegrationResponse{
+			Update: &model.Post{
+				Id: postID,
+				Props: map[string]interface{}{
+					"attachments": []*model.SlackAttachment{
+						{
+							Title: "Secret Message",
+							Text:  "This secret message has been closed.",
+							Color: "#DDDDDD",
+						},
+					},
+				},
+			},
+			EphemeralText: "You've closed this secret message.",
+		}
+
+		// Return the update that replaces the message
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(update); err != nil {
+			p.API.LogError("Failed to write JSON response", "error", err.Error())
+		}
+		return
+	}
+
+	// Construct actions for the response
+	actions := []*model.PostAction{
+		{
+			Id:   model.NewId(),
+			Name: "Close",
+			Type: "button",
+			Integration: &model.PostActionIntegration{
+				URL: fmt.Sprintf("/plugins/com.mattermost.secrets-plugin/api/v1/secrets/view?secret_id=%s&action=close&post_id=${post.id}", secret.ID),
+			},
+		},
+	}
+
 	// Construct a proper update to show the secret
 	update := &model.PostActionIntegrationResponse{
 		Update: &model.Post{
@@ -177,23 +249,157 @@ func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
 				"attachments": []*model.SlackAttachment{
 					{
 						Title: "Secret Message",
-						Text:  fmt.Sprintf("**From @%s:**\n\n%s", username, secret.Message),
+						Text:  fmt.Sprintf("**From @%s:**\n\n```\n%s\n```", username, secret.Message),
 						Fields: []*model.SlackAttachmentField{
 							{
 								Title: "Status",
-								Value: "This message has been viewed and cannot be viewed again.",
+								Value: "This message can only be viewed once per person. It will be automatically deleted when everyone in the channel has viewed it or when it expires.",
 								Short: false,
 							},
 						},
+						Actions: actions,
 					},
 				},
 			},
 		},
 	}
 
+	// Check if all users have viewed the secret
+	// For channels with many members, we'll consider it fully viewed after 75% of members have seen it
+	go func() {
+		// Get channel members
+		var memberCount int
+
+		// Check if this is a DM/GM channel
+		channel, appErr := p.API.GetChannel(secret.ChannelID)
+		if appErr != nil {
+			p.API.LogError("Failed to get channel", "channel_id", secret.ChannelID, "error", appErr.Error())
+		} else {
+			// Check channel type
+			if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
+				// For DMs, just count the channel members
+				stats, appErr := p.API.GetChannelStats(secret.ChannelID)
+				if appErr != nil {
+					p.API.LogError("Failed to get channel stats", "channel_id", secret.ChannelID, "error", appErr.Error())
+				} else {
+					memberCount = int(stats.MemberCount)
+				}
+			} else {
+				// For regular channels, get total member count
+				stats, appErr := p.API.GetChannelStats(secret.ChannelID)
+				if appErr != nil {
+					p.API.LogError("Failed to get channel stats", "channel_id", secret.ChannelID, "error", appErr.Error())
+				} else {
+					memberCount = int(stats.MemberCount)
+				}
+			}
+		}
+
+		// No point keeping track if we couldn't determine membership
+		if memberCount == 0 {
+			memberCount = 10 // Default to a reasonable number
+		}
+
+		// Calculate threshold for considering the secret fully viewed
+		// Always require 100% of members to view the secret
+		viewThreshold := memberCount
+
+		// Check if we've reached the threshold
+		if len(secret.ViewedBy) >= viewThreshold {
+			// All members have viewed the secret, clean it up
+			if err := p.secretStore.DeleteSecret(secret.ID); err != nil {
+				p.API.LogError("Failed to delete viewed secret", "secret_id", secret.ID, "error", err.Error())
+			}
+
+			// Try to delete the post too
+			posts, appErr := p.API.GetPostsForChannel(secret.ChannelID, 0, 100)
+			if appErr != nil {
+				p.API.LogError("Failed to get posts for channel", "channel_id", secret.ChannelID, "error", appErr.Error())
+				return
+			}
+
+			// Try to find the post containing this secret
+			for _, post := range posts.Posts {
+				if attachments, ok := post.Props["attachments"].([]interface{}); ok {
+					for _, attachment := range attachments {
+						if attach, ok := attachment.(map[string]interface{}); ok {
+							if actions, ok := attach["actions"].([]interface{}); ok {
+								for _, action := range actions {
+									if act, ok := action.(map[string]interface{}); ok {
+										if integration, ok := act["integration"].(map[string]interface{}); ok {
+											url, ok := integration["url"].(string)
+											if ok && strings.Contains(url, secret.ID) {
+												// Found the post, delete it after a delay
+												time.AfterFunc(5*time.Second, func() {
+													if appErr := p.API.DeletePost(post.Id); appErr != nil {
+														p.API.LogError("Failed to delete post for viewed secret", "post_id", post.Id, "error", appErr.Error())
+													}
+												})
+												break
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
+
 	// Return the dialog that shows the secret
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(update); err != nil {
+		p.API.LogError("Failed to write JSON response", "error", err.Error())
+	}
+}
+
+// handleCloseSecret handles closing a secret for a specific user
+func (p *Plugin) handleCloseSecret(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		http.Error(w, "Not authorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get the secret ID from the query parameters
+	secretID := r.URL.Query().Get("secret_id")
+	if secretID == "" {
+		http.Error(w, "Secret ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Extract the post ID from the context
+	postID := r.URL.Query().Get("post_id")
+	if postID == "" {
+		postID = "unknown_post_id" // Fallback if post_id is missing
+	}
+
+	// Create a response that replaces the message for this user with a simple acknowledgment
+	response := &model.PostActionIntegrationResponse{
+		Update: &model.Post{
+			Id: postID,
+			Props: map[string]interface{}{
+				"attachments": []*model.SlackAttachment{
+					{
+						Title: "Secret Message",
+						Text:  "This secret message has been closed.",
+						Color: "#DDDDDD",
+					},
+				},
+			},
+		},
+		EphemeralText: "You've closed this secret message.",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		p.API.LogError("Failed to write JSON response", "error", err.Error())
 	}
 }
@@ -248,7 +454,80 @@ func (p *Plugin) OnActivate() error {
 		return errors.Wrap(err, "failed to register command")
 	}
 
+	// Start a routine to clean up expired secrets
+	go p.periodicCleanup()
+
 	return nil
+}
+
+// periodicCleanup periodically checks for and deletes expired secrets
+func (p *Plugin) periodicCleanup() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			p.cleanupExpiredSecrets()
+		}
+	}
+}
+
+// cleanupExpiredSecrets finds and removes expired secrets
+func (p *Plugin) cleanupExpiredSecrets() {
+	p.API.LogDebug("Checking for expired secrets")
+
+	// Get all secrets
+	secrets, err := p.secretStore.GetAllSecrets()
+	if err != nil {
+		p.API.LogError("Failed to get secrets for cleanup", "error", err.Error())
+		return
+	}
+
+	currentTime := models.GetMillis()
+	for _, secret := range secrets {
+		// Check if the secret has expired
+		if secret.ExpiresAt <= currentTime {
+			p.API.LogDebug("Deleting expired secret", "secret_id", secret.ID)
+
+			// Delete the post if we can find it
+			posts, appErr := p.API.GetPostsForChannel(secret.ChannelID, 0, 100)
+			if appErr != nil {
+				p.API.LogError("Failed to get posts for channel", "channel_id", secret.ChannelID, "error", appErr.Error())
+			} else {
+				// Try to find the post containing this secret
+				for _, post := range posts.Posts {
+					if attachments, ok := post.Props["attachments"].([]interface{}); ok {
+						for _, attachment := range attachments {
+							if attach, ok := attachment.(map[string]interface{}); ok {
+								if actions, ok := attach["actions"].([]interface{}); ok {
+									for _, action := range actions {
+										if act, ok := action.(map[string]interface{}); ok {
+											if integration, ok := act["integration"].(map[string]interface{}); ok {
+												url, ok := integration["url"].(string)
+												if ok && strings.Contains(url, secret.ID) {
+													// Found the post, delete it
+													if appErr := p.API.DeletePost(post.Id); appErr != nil {
+														p.API.LogError("Failed to delete post for expired secret", "post_id", post.Id, "error", appErr.Error())
+													}
+													break
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Delete the secret
+			if err := p.secretStore.DeleteSecret(secret.ID); err != nil {
+				p.API.LogError("Failed to delete expired secret", "secret_id", secret.ID, "error", err.Error())
+			}
+		}
+	}
 }
 
 // MessageWillBePosted is invoked when a message is posted by a user before it is committed
@@ -340,7 +619,7 @@ func (p *Plugin) createSecret(userID, channelID, message string) (*models.Secret
 		Message:   message,
 		ViewedBy:  []string{},
 		CreatedAt: models.GetMillis(),
-		ExpiresAt: models.GetMillis() + (int64(p.getConfiguration().SecretExpiryTime) * 60 * 60 * 1000), // Convert hours to milliseconds
+		ExpiresAt: models.GetMillis() + (int64(p.getConfiguration().SecretExpiryTime) * 60 * 1000), // Convert minutes to milliseconds
 	}
 
 	// Save the secret
