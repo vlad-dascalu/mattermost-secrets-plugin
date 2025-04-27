@@ -75,11 +75,58 @@ func (p *Plugin) handleSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If RootId is provided, verify it exists
+	if req.RootId != "" {
+		_, appErr := p.API.GetPost(req.RootId)
+		if appErr != nil {
+			http.Error(w, fmt.Sprintf("Invalid rootId: %s", appErr.Error()), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Create the secret
-	secret, err := p.createSecret(userID, req.ChannelID, req.Message)
+	secret, err := p.createSecret(userID, req.ChannelID, req.Message, req.RootId)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Get the user who created the secret
+	user, appErr := p.API.GetUser(userID)
+	if appErr != nil {
+		p.API.LogError("Failed to get user", "error", appErr.Error())
+		p.writeJSON(w, secret)
+		return
+	}
+
+	// Create the post with the secret placeholder
+	post := &model.Post{
+		UserId:    p.botID,
+		ChannelId: req.ChannelID,
+		RootId:    req.RootId,
+		Props: map[string]interface{}{
+			"attachments": []*model.SlackAttachment{
+				{
+					Title: "Secret Message",
+					Text:  fmt.Sprintf("@%s has sent a secret message. Click to view it once.", user.Username),
+					Actions: []*model.PostAction{
+						{
+							Id:   model.NewId(),
+							Name: "View Secret",
+							Type: "button",
+							Integration: &model.PostActionIntegration{
+								URL: fmt.Sprintf("/plugins/com.mattermost.secrets-plugin/api/v1/secrets/view?secret_id=%s", secret.ID),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, postErr := p.API.CreatePost(post)
+	if postErr != nil {
+		p.API.LogError("Failed to create post", "error", postErr.Error())
 	}
 
 	p.writeJSON(w, secret)
@@ -553,7 +600,7 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 	}
 
 	// Create the secret
-	secret, err := p.createSecret(args.UserId, args.ChannelId, message)
+	secret, err := p.createSecret(args.UserId, args.ChannelId, message, args.RootId)
 	if err != nil {
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
@@ -574,6 +621,7 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 	post := &model.Post{
 		UserId:    p.botID,
 		ChannelId: args.ChannelId,
+		RootId:    args.RootId,
 		Props: map[string]interface{}{
 			"attachments": []*model.SlackAttachment{
 				{
@@ -610,12 +658,13 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 }
 
 // createSecret creates a new secret message
-func (p *Plugin) createSecret(userID, channelID, message string) (*models.Secret, error) {
+func (p *Plugin) createSecret(userID, channelID, message string, rootID string) (*models.Secret, error) {
 	// Create a new secret
 	secret := &models.Secret{
 		ID:        model.NewId(),
 		UserID:    userID,
 		ChannelID: channelID,
+		RootId:    rootID,
 		Message:   message,
 		ViewedBy:  []string{},
 		CreatedAt: models.GetMillis(),
