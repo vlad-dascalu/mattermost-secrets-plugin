@@ -9,8 +9,9 @@ GO ?= "$(shell command -v go 2> /dev/null)"
 NPM ?= "$(shell command -v npm 2> /dev/null)"
 CURL ?= "$(shell command -v curl 2> /dev/null)"
 
-# Hardcode the output filename for Windows
-PLUGIN_OUTPUT_NAME = plugin-windows-amd64.exe
+# Get OS and architecture for conditional building
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
 
 all: dist
 
@@ -22,7 +23,12 @@ build: server webapp
 
 server:
 	mkdir -p build/server/dist
-	cd server && $(GO) build -o "../build/server/dist/$(PLUGIN_OUTPUT_NAME)" .
+	# Build for Windows
+	cd server && GOOS=windows GOARCH=amd64 $(GO) build -o "../build/server/dist/plugin-windows-amd64.exe" .
+	# Build for Linux
+	cd server && GOOS=linux GOARCH=amd64 $(GO) build -o "../build/server/dist/plugin-linux-amd64" .
+	# Build for macOS (optional)
+	cd server && GOOS=darwin GOARCH=amd64 $(GO) build -o "../build/server/dist/plugin-darwin-amd64" .
 
 webapp:
 	cd webapp && $(NPM) install --legacy-peer-deps
@@ -39,7 +45,7 @@ clean:
 test: test-server test-webapp
 
 test-server:
-	cd server && $(GO) test -race -coverprofile=coverage.txt -covermode=atomic ./...
+	cd server && CGO_ENABLED=1 $(GO) test -race -coverprofile=coverage.txt -covermode=atomic ./...
 
 test-webapp:
 	cd webapp && $(NPM) run test
