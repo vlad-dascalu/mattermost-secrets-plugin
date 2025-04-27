@@ -33,6 +33,25 @@ The easiest way to send a secret message is with the `/secret` slash command:
 
 Anyone in the channel where you send the secret will see that a secret message exists, but only those who click the "View Secret" button will be able to see the actual content of the message.
 
+#### Multi-line Secrets
+
+The plugin supports multi-line secrets for sharing formatted content like code snippets, configuration files, or structured data. To create a multi-line secret:
+
+1. Type `/secret` on the first line
+2. Press Shift+Enter to start a new line
+3. Type the content of your secret on subsequent lines
+
+Example:
+```
+/secret
+server: api.example.com
+username: admin
+password: s3cr3t
+api_key: abcd1234efgh5678
+```
+
+This formatting is preserved when the secret is viewed and copied.
+
 ### Viewing a Secret Message
 
 When someone sends a secret message, you'll see a post with a "View Secret" button. After clicking the button, the secret message content will be displayed in a secure container. You can copy the content to your clipboard by clicking the copy icon.
