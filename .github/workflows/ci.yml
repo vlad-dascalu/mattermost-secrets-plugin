@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  server-test:
+    name: Server Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+      
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.18
+      
+    - name: Get dependencies
+      run: |
+        cd server
+        go get -v -t -d ./...
+      
+    - name: Test
+      run: |
+        cd server
+        go test -race -coverprofile=coverage.txt -covermode=atomic ./...
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./server/coverage.txt
+        flags: server
+        fail_ci_if_error: false
+
+  webapp-test:
+    name: Webapp Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+      
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: 16
+      
+    - name: Install dependencies
+      run: |
+        cd webapp
+        npm ci
+      
+    - name: Test
+      run: |
+        cd webapp
+        npm test -- --coverage
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./webapp/coverage/lcov.info
+        flags: webapp
+        fail_ci_if_error: false
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+      
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.18
+      
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: 16
+      
+    - name: Install dependencies
+      run: |
+        cd webapp
+        npm ci
+      
+    - name: Build
+      run: make build
+      
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: plugin-package
+        path: dist/*.tar.gz 

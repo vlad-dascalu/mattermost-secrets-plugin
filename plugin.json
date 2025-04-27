@@ -1,0 +1,43 @@
+{
+    "id": "com.mattermost.secrets-plugin",
+    "name": "Secrets Plugin",
+    "description": "A plugin for sending secret messages that can only be viewed once.",
+    "homepage_url": "https://github.com/mattermost/mattermost-plugin-secrets",
+    "support_url": "https://github.com/mattermost/mattermost-plugin-secrets/issues",
+    "release_notes_url": "https://github.com/mattermost/mattermost-plugin-secrets/releases/tag/v0.1.0",
+    "icon_path": "assets/icon.svg",
+    "version": "0.1.0",
+    "min_server_version": "7.0.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64",
+            "darwin-amd64": "server/dist/plugin-darwin-amd64",
+            "windows-amd64": "server/dist/plugin-windows-amd64.exe"
+        }
+    },
+    "webapp": {
+        "bundle_path": "webapp/dist/main.js"
+    },
+    "settings_schema": {
+        "header": "Configure the Secrets Plugin",
+        "footer": "© 2024 Mattermost, Inc.",
+        "settings": [
+            {
+                "key": "SecretExpiryTime",
+                "display_name": "Secret Expiry Time (hours)",
+                "type": "number",
+                "help_text": "The number of hours after which an unviewed secret will expire.",
+                "placeholder": "24",
+                "default": 24
+            },
+            {
+                "key": "AllowCopyToClipboard",
+                "display_name": "Allow Copy to Clipboard",
+                "type": "bool",
+                "help_text": "Whether users can copy the secret to clipboard when viewing.",
+                "placeholder": "",
+                "default": true
+            }
+        ]
+    }
+} 
