@@ -5,13 +5,41 @@ A Mattermost plugin for sending secret messages that can only be viewed once.
 ## Features
 
 - Send secret messages through Mattermost
-- Messages can only be viewed once
+- Messages can only be viewed once by each recipient
 - Messages expire after a configurable time period
-- Supports both slash commands and UI options
+- Secure storage of sensitive information
+- Supports slash commands for easy secret sharing
 
-## Screenshots
+## What is a Secret Message?
 
-![Secret Message](assets/screenshot1.png)
+A secret message is a piece of text that:
+
+- Can only be viewed once by each recipient
+- Disappears after being viewed
+- Has an expiration time
+- Is stored securely
+
+This is ideal for sending sensitive information like passwords, API keys, or other private data that shouldn't persist in chat history.
+
+## Usage
+
+### Sending a Secret Message
+
+The easiest way to send a secret message is with the `/secret` slash command:
+
+```
+/secret Your temporary password is: P@ssw0rd123!
+```
+
+Anyone in the channel where you send the secret will see that a secret message exists, but only those who click the "View Secret" button will be able to see the actual content of the message.
+
+### Viewing a Secret Message
+
+When someone sends a secret message, you'll see a post with a "View Secret" button. After clicking the button, the secret message content will be displayed in a secure container. You can copy the content to your clipboard by clicking the copy icon.
+
+Once you navigate away from the conversation, the secret will no longer be visible to you.
+
+For more detailed usage instructions, see the [User Guide](docs/user_guide.md).
 
 ## Building the Plugin
 
@@ -23,8 +51,6 @@ A Mattermost plugin for sending secret messages that can only be viewed once.
 
 ### Build Process
 
-#### Option 1: Using Makefile (recommended)
-
 ```bash
 # Clean previous builds
 make clean
@@ -35,36 +61,6 @@ make build
 # Create the distribution bundle
 make dist
 ```
-
-#### Option 2: Using Node.js build script
-
-```bash
-# Install Node.js dependencies and run the build script
-node build.js
-```
-
-#### Option 3: Manual build
-
-1. Build the server component:
-   ```bash
-   cd server
-   go mod tidy
-   go build -o ../build/server/dist/plugin-windows-amd64.exe
-   ```
-
-2. Build the webapp component:
-   ```bash
-   cd webapp
-   npm install --legacy-peer-deps
-   npm run build
-   ```
-
-3. Copy files to the build directory:
-   ```bash
-   cp plugin.json build/
-   mkdir -p build/webapp
-   cp -r webapp/dist build/webapp/
-   ```
 
 ## Installing the Plugin
 
@@ -78,27 +74,12 @@ After building, you'll have a file `dist/com.mattermost.secrets-plugin-0.1.0.tar
 
 1. Go to **System Console > Plugins > Secrets Plugin**
 2. Configure the following settings:
-   - **Secret Expiry Time (hours)**: Number of hours before an unviewed secret expires
-   - **Allow Copy to Clipboard**: Whether users can copy the secret to clipboard
-
-## Usage
-
-### Slash Command
-
-Send a secret message using the slash command:
-
-```
-/secret This is a secret message
-```
-
-### UI Button
-
-1. Click the "+" button in the message input
-2. Select "Send Secret Message"
-3. Enter your secret message
-4. Click "Send"
+   - **Secret Expiry Time (hours)**: Number of hours before an unviewed secret expires (default: 24)
+   - **Allow Copy to Clipboard**: Whether users can copy the secret to clipboard when viewing (default: true)
 
 ## Development
+
+Detailed information for developers who want to understand, customize, or contribute to the plugin can be found in the [Development Guide](docs/development.md).
 
 ### Server
 
@@ -118,6 +99,15 @@ cd webapp
 npm run test
 npm run lint
 ```
+
+## Use Cases
+
+The Secrets Plugin is ideal for:
+
+- Sharing temporary passwords
+- Sending API keys or tokens
+- Communicating sensitive personal information
+- Sharing confidential URLs or access information
 
 ## License
 
