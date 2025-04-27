@@ -5,20 +5,29 @@ module.exports = {
     output: {
         path: path.join(__dirname, 'dist'),
         filename: 'main.js',
+        publicPath: '/',
     },
     resolve: {
-        extensions: ['*', '.js', '.jsx'],
+        extensions: ['*', '.js', '.jsx', '.ts', '.tsx'],
+        fallback: {
+            "path": false,
+            "fs": false,
+            "crypto": false
+        }
     },
     module: {
         rules: [
             {
-                test: /\.(js|jsx)$/,
+                test: /\.(js|jsx|ts|tsx)$/,
                 exclude: /node_modules/,
                 use: {
                     loader: 'babel-loader',
                     options: {
                         presets: [
-                            '@babel/preset-env',
+                            ['@babel/preset-env', {
+                                useBuiltIns: 'usage',
+                                corejs: 3
+                            }],
                             '@babel/preset-react',
                         ],
                         plugins: [
@@ -45,11 +54,12 @@ module.exports = {
             },
             {
                 test: /\.(png|jpg|gif|svg)$/i,
-                use: [
-                    {
-                        loader: 'file-loader',
-                    },
-                ],
+                type: 'asset',
+                parser: {
+                    dataUrlCondition: {
+                        maxSize: 8192
+                    }
+                }
             },
         ],
     },

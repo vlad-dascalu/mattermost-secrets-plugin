@@ -4,9 +4,13 @@ PLUGIN_ID ?= com.mattermost.secrets-plugin
 PLUGIN_VERSION ?= 0.1.0
 BUNDLE_NAME ?= $(PLUGIN_ID)-$(PLUGIN_VERSION).tar.gz
 
-GO ?= $(shell command -v go 2> /dev/null)
-NPM ?= $(shell command -v npm 2> /dev/null)
-CURL ?= $(shell command -v curl 2> /dev/null)
+# Define commands with proper quoting for Windows paths
+GO ?= "$(shell command -v go 2> /dev/null)"
+NPM ?= "$(shell command -v npm 2> /dev/null)"
+CURL ?= "$(shell command -v curl 2> /dev/null)"
+
+# Hardcode the output filename for Windows
+PLUGIN_OUTPUT_NAME = plugin-windows-amd64.exe
 
 all: dist
 
@@ -18,10 +22,11 @@ build: server webapp
 
 server:
 	mkdir -p build/server/dist
-	cd server && $(GO) build -o ../build/server/dist/plugin-$(shell go env GOOS)-$(shell go env GOARCH) .
+	cd server && $(GO) build -o "../build/server/dist/$(PLUGIN_OUTPUT_NAME)" .
 
 webapp:
-	cd webapp && $(NPM) install
+	cd webapp && $(NPM) install --legacy-peer-deps
+	cd webapp && $(NPM) install --save ajv@^8.0.0
 	cd webapp && $(NPM) run build
 	mkdir -p build/webapp
 	cp -r webapp/dist build/webapp

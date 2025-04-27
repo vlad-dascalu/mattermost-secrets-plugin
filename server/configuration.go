@@ -1,8 +1,6 @@
 package main
 
 import (
-	"reflect"
-
 	"github.com/pkg/errors"
 )
 
@@ -16,7 +14,7 @@ import (
 //
 // See https://developers.mattermost.com/extend/plugins/server/reference/
 type configuration struct {
-	SecretExpiryTime   int  `json:"SecretExpiryTime"`
+	SecretExpiryTime     int  `json:"SecretExpiryTime"`
 	AllowCopyToClipboard bool `json:"AllowCopyToClipboard"`
 }
 
@@ -73,4 +71,4 @@ func (p *Plugin) OnConfigurationChange() error {
 	p.setConfiguration(configuration)
 
 	return nil
-} 
+}

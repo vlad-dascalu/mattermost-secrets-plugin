@@ -10,7 +10,7 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/pkg/errors"
-	
+
 	"github.com/mattermost/mattermost-plugin-secrets/server/models"
 	"github.com/mattermost/mattermost-plugin-secrets/server/store"
 )
@@ -126,11 +126,11 @@ func (p *Plugin) OnActivate() error {
 		Description: "A bot account for the Secrets plugin",
 	}
 
-	botUserID, err := p.Helpers.EnsureBot(bot)
+	botUser, err := p.API.CreateBot(bot)
 	if err != nil {
-		return errors.Wrap(err, "failed to ensure bot account")
+		return errors.Wrap(err, "failed to create bot account")
 	}
-	p.botID = botUserID
+	p.botID = botUser.UserId
 
 	// Register the slash command
 	if err := p.API.RegisterCommand(&model.Command{
@@ -158,10 +158,10 @@ func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*mode
 func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
 	// Skip the command name (/secret)
 	message := args.Command[len("/secret"):]
-	
+
 	// Trim whitespace
 	message = strings.TrimSpace(message)
-	
+
 	if message == "" {
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
@@ -178,6 +178,15 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		}, nil
 	}
 
+	// Get the user who created the secret
+	user, appErr := p.API.GetUser(args.UserId)
+	if appErr != nil {
+		return &model.CommandResponse{
+			ResponseType: model.CommandResponseTypeEphemeral,
+			Text:         fmt.Sprintf("Error getting user: %s", appErr.Error()),
+		}, nil
+	}
+
 	// Create the post with the secret placeholder
 	post := &model.Post{
 		UserId:    p.botID,
@@ -186,7 +195,7 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 			"attachments": []*model.SlackAttachment{
 				{
 					Title: "Secret Message",
-					Text:  fmt.Sprintf("@%s has sent a secret message. Click to view it once.", args.Username),
+					Text:  fmt.Sprintf("@%s has sent a secret message. Click to view it once.", user.Username),
 					Actions: []*model.PostAction{
 						{
 							Id:   model.NewId(),
@@ -202,16 +211,17 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		},
 	}
 
-	if _, err := p.API.CreatePost(post); err != nil {
+	_, err = p.API.CreatePost(post)
+	if err != nil {
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("Error posting secret message: %s", err.Error()),
+			Text:         fmt.Sprintf("Error creating post: %s", err.Error()),
 		}, nil
 	}
 
 	return &model.CommandResponse{
 		ResponseType: model.CommandResponseTypeEphemeral,
-		Text:         "Secret message created successfully.",
+		Text:         "Secret message created successfully!",
 	}, nil
 }
 
@@ -257,7 +267,7 @@ func (p *Plugin) markSecretAsViewed(secretID, userID string) error {
 
 	// Mark as viewed by this user
 	secret.ViewedBy = append(secret.ViewedBy, userID)
-	
+
 	// Save the updated secret
 	if err := p.secretStore.SaveSecret(secret); err != nil {
 		return errors.Wrap(err, "failed to update secret")
@@ -285,4 +295,4 @@ func (p *Plugin) writeJSON(w http.ResponseWriter, v interface{}) {
 // This function needs to be defined for our plugin to be started
 func main() {
 	plugin.ClientMain(&Plugin{})
-} 
+}
