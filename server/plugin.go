@@ -40,6 +40,8 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 		p.handleSecret(w, r)
 	case "/api/v1/secrets/viewed":
 		p.handleSecretViewed(w, r)
+	case "/api/v1/secrets/view":
+		p.handleViewSecret(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -112,6 +114,88 @@ func (p *Plugin) handleSecretViewed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleViewSecret handles requests when a user clicks the View Secret button
+func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		http.Error(w, "Not authorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// For button actions, we need to parse the form values
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse form: %s", err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	// Get the secret ID from the query parameters
+	secretID := r.URL.Query().Get("secret_id")
+	if secretID == "" {
+		http.Error(w, "Secret ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the secret
+	secret, err := p.secretStore.GetSecret(secretID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get secret: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	if secret == nil {
+		http.Error(w, "Secret not found", http.StatusNotFound)
+		return
+	}
+
+	// Mark the secret as viewed
+	if err := p.markSecretAsViewed(secretID, userID); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to mark secret as viewed: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the user who created the secret for display purposes
+	user, appErr := p.API.GetUser(secret.UserID)
+	var username string
+	if appErr != nil {
+		p.API.LogError("Failed to get user", "error", appErr.Error())
+		username = "Unknown User"
+	} else {
+		username = user.Username
+	}
+
+	// Construct a proper update to show the secret
+	update := &model.PostActionIntegrationResponse{
+		Update: &model.Post{
+			Props: map[string]interface{}{
+				"attachments": []*model.SlackAttachment{
+					{
+						Title: "Secret Message",
+						Text:  fmt.Sprintf("**From @%s:**\n\n%s", username, secret.Message),
+						Fields: []*model.SlackAttachmentField{
+							{
+								Title: "Status",
+								Value: "This message has been viewed and cannot be viewed again.",
+								Short: false,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Return the dialog that shows the secret
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(update); err != nil {
+		p.API.LogError("Failed to write JSON response", "error", err.Error())
+	}
 }
 
 // OnActivate is invoked when the plugin is activated
@@ -231,11 +315,12 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 		},
 	}
 
-	_, err = p.API.CreatePost(post)
-	if err != nil {
+	var postErr *model.AppError
+	_, postErr = p.API.CreatePost(post)
+	if postErr != nil {
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("Error creating post: %s", err.Error()),
+			Text:         fmt.Sprintf("Error creating post: %s", postErr.Error()),
 		}, nil
 	}
 
