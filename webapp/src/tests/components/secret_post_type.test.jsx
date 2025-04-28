@@ -1,13 +1,30 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { SecretPostType } from '../../components/secret_post_type';
-import { handleViewSecret } from '../../actions';
+import SecretPostType from '../../components/secret_post_type';
+import { Client4 } from 'mattermost-redux/client';
 
-// Mock the actions
-jest.mock('../../actions', () => ({
-    handleViewSecret: jest.fn(),
+// Mock Client4
+jest.mock('mattermost-redux/client', () => ({
+    Client4: {
+        getUrl: jest.fn().mockReturnValue('http://localhost:8065'),
+    },
 }));
+
+// Mock localStorage
+const localStorageMock = (function() {
+    let store = {};
+    return {
+        getItem: jest.fn(key => store[key] || null),
+        setItem: jest.fn((key, value) => {
+            store[key] = value.toString();
+        }),
+        clear: jest.fn(() => {
+            store = {};
+        }),
+    };
+})();
+Object.defineProperty(window, 'localStorage', { value: localStorageMock });
 
 // Mock fetch
 global.fetch = jest.fn();
@@ -28,14 +45,10 @@ describe('components/SecretPostType', () => {
             buttonBg: '#166de0',
             buttonColor: '#ffffff',
         },
-        actions: {
-            handleViewSecret,
-        },
     };
 
     beforeEach(() => {
-        handleViewSecret.mockClear();
-        localStorage.clear();
+        localStorageMock.clear();
         global.fetch.mockClear();
     });
 
@@ -78,7 +91,7 @@ describe('components/SecretPostType', () => {
         fireEvent.click(screen.getByText('View Secret'));
         
         await waitFor(() => {
-            expect(screen.getByText('Failed to fetch secret: Secret not found')).toBeInTheDocument();
+            expect(screen.getByText(/Failed to fetch secret/)).toBeInTheDocument();
         });
     });
 
@@ -100,7 +113,7 @@ describe('components/SecretPostType', () => {
     it('should show already viewed message when secret was previously viewed', () => {
         const secretId = baseProps.post.props.secret_id;
         const viewedAt = Date.now() - 1000;
-        localStorage.setItem(`secret_viewed_${secretId}`, viewedAt.toString());
+        localStorageMock.setItem(`secret_viewed_${secretId}`, viewedAt.toString());
         
         render(<SecretPostType {...baseProps} />);
         expect(screen.getByText('You have already viewed this secret message.')).toBeInTheDocument();

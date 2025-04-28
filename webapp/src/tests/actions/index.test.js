@@ -1,188 +1,171 @@
-import { handleViewSecret } from '../../actions';
-import {id as pluginId} from '../../manifest';
+import { handleViewSecret, handleCloseSecret } from '../../actions';
 
-// Mock fetchs
+// Mock fetch
 global.fetch = jest.fn();
 
-// Mock localStorage
-const localStorageMock = {
-    getItem: jest.fn(),
-    setItem: jest.fn(),
-};
-Object.defineProperty(window, 'localStorage', { value: localStorageMock });
-
-// Mock Client4.getUrl()
-jest.mock('mattermost-redux/client', () => ({
-    Client4: {
-        getUrl: jest.fn(() => 'http://localhost:8065'),
-    },
-}));
-
 describe('actions', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
     describe('handleViewSecret', () => {
-        let dispatch;
-        let getState;
-        
         beforeEach(() => {
-            fetch.mockClear();
-            localStorageMock.getItem.mockClear();
-            localStorageMock.setItem.mockClear();
-            dispatch = jest.fn();
-            getState = jest.fn();
+            global.fetch.mockClear();
         });
         
-        it('should return error if no secret ID is provided', async () => {
-            const post = { props: {} };
-            const result = handleViewSecret(post);
-            
-            expect(result.error).toBeDefined();
-            expect(result.error.message).toBe('Invalid secret message');
-        });
-        
-        it('should return already viewed data if secret was previously viewed', async () => {
-            const post = { props: { secret_id: 'test-secret-id' } };
-            const viewedAt = Date.now();
-            localStorageMock.getItem.mockReturnValue(viewedAt.toString());
-            
-            const result = handleViewSecret(post);
-            
-            expect(result.data).toEqual({
-                secretId: 'test-secret-id',
-                alreadyViewed: true,
-                viewedAt: viewedAt
-            });
-            expect(fetch).not.toHaveBeenCalled();
-        });
-        
-        it('should make API call and dispatch action on success', async () => {
-            const post = { props: { secret_id: 'test-secret-id' } };
-            localStorageMock.getItem.mockReturnValue(null);
-            
+        it('should call API with correct parameters', async () => {
             // Mock successful API response
-            fetch.mockImplementation(() => 
+            global.fetch.mockImplementation(() => 
                 Promise.resolve({
                     ok: true,
-                    json: () => Promise.resolve({}),
+                    json: () => Promise.resolve({ success: true }),
                 })
             );
             
-            const action = handleViewSecret(post);
-            const result = await action(dispatch, getState);
+            const secretId = 'test-secret-id';
+            await handleViewSecret(secretId)();
             
             // Check API call
-            expect(fetch).toHaveBeenCalledTimes(1);
-            expect(fetch).toHaveBeenCalledWith(
-                `http://localhost:8065/plugins/${pluginId}/api/v1/secrets/view?secret_id=test-secret-id`,
-                expect.any(Object)
+            expect(global.fetch).toHaveBeenCalledWith(
+                `/plugins/secrets-plugin/api/v1/secrets/view?secret_id=${secretId}`,
+                expect.objectContaining({
+                    method: 'GET',
+                    headers: expect.objectContaining({
+                        'Content-Type': 'application/json',
+                    }),
+                })
             );
-            
-            // Check localStorage was updated
-            expect(localStorageMock.setItem).toHaveBeenCalledWith(
-                'secret_viewed_test-secret-id',
-                expect.any(String)
-            );
-            
-            // Check dispatch was called with correct action
-            expect(dispatch).toHaveBeenCalledWith({
-                type: 'RECEIVED_SECRET',
-                data: {
-                    secretId: 'test-secret-id',
-                    viewed: true,
-                    viewedAt: expect.any(Number),
-                },
-            });
-            
-            // Check result
-            expect(result.data).toEqual({
-                secretId: 'test-secret-id',
-                viewed: true,
-                viewedAt: expect.any(Number),
-            });
         });
         
-        it('should handle API errors', async () => {
-            const post = { props: { secret_id: 'test-secret-id' } };
-            localStorageMock.getItem.mockReturnValue(null);
+        it('should return data from API on success', async () => {
+            const responseData = { success: true, message: 'Secret viewed' };
+            
+            // Mock successful API response
+            global.fetch.mockImplementation(() => 
+                Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve(responseData),
+                })
+            );
+            
+            const secretId = 'test-secret-id';
+            const result = await handleViewSecret(secretId)();
+            
+            expect(result).toEqual(responseData);
+        });
+        
+        it('should return error object when API call fails', async () => {
+            // Mock API error
             const error = new Error('API error');
+            global.fetch.mockImplementation(() => Promise.reject(error));
             
-            // Mock failed API response
-            fetch.mockImplementation(() => Promise.reject(error));
+            const secretId = 'test-secret-id';
+            const result = await handleViewSecret(secretId)();
             
-            const action = handleViewSecret(post);
-            const result = await action(dispatch, getState);
+            expect(result).toEqual({ error: 'API error' });
+        });
+
+        it('should return error object when response is not OK', async () => {
+            // Mock non-OK response
+            global.fetch.mockImplementation(() => 
+                Promise.resolve({
+                    ok: false,
+                    status: 404,
+                    json: () => Promise.resolve({ message: 'Not found' }),
+                })
+            );
             
-            // Check no dispatch called
-            expect(dispatch).not.toHaveBeenCalled();
+            const secretId = 'test-secret-id';
+            const result = await handleViewSecret(secretId)();
             
-            // Check localStorage was not updated
-            expect(localStorageMock.setItem).not.toHaveBeenCalled();
-            
-            // Check error returned
-            expect(result.error).toBe(error);
+            expect(result).toEqual({ error: 'HTTP error! status: 404' });
         });
 
         it('should handle JSON parsing errors', async () => {
             // Mock fetch to return a response that can't be parsed as JSON
-            global.fetch = jest.fn().mockImplementation(() => Promise.resolve({
+            global.fetch.mockImplementation(() => Promise.resolve({
                 ok: true,
-                json: () => {
-                    throw new Error('Invalid JSON');
-                },
+                json: () => Promise.reject(new Error('Invalid JSON')),
             }));
 
-            const post = {
-                props: {
-                    secret_id: 'test-secret-id',
-                },
-            };
-
-            const dispatch = jest.fn();
-            const result = await handleViewSecret(post)(dispatch);
+            const secretId = 'test-secret-id';
+            const result = await handleViewSecret(secretId)();
             
-            expect(result.error).toBeDefined();
-            expect(result.error.message).toContain('Failed to fetch secret');
-            expect(dispatch).not.toHaveBeenCalled();
-            expect(localStorageMock.setItem).not.toHaveBeenCalled();
+            expect(result).toEqual({ error: 'Invalid JSON' });
+        });
+    });
+
+    describe('handleCloseSecret', () => {
+        it('should call API with correct parameters', async () => {
+            // Mock successful API response
+            global.fetch.mockImplementation(() => 
+                Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ success: true }),
+                })
+            );
+            
+            const secretId = 'test-secret-id';
+            const postId = 'test-post-id';
+            await handleCloseSecret(secretId, postId)();
+            
+            // Check API call
+            expect(global.fetch).toHaveBeenCalledWith(
+                `/plugins/secrets-plugin/api/v1/secrets/close?secret_id=${secretId}&post_id=${postId}`,
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'Content-Type': 'application/json',
+                    }),
+                })
+            );
+        });
+        
+        it('should return data from API on success', async () => {
+            const responseData = { success: true, message: 'Secret closed' };
+            
+            // Mock successful API response
+            global.fetch.mockImplementation(() => 
+                Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve(responseData),
+                })
+            );
+            
+            const secretId = 'test-secret-id';
+            const postId = 'test-post-id';
+            const result = await handleCloseSecret(secretId, postId)();
+            
+            expect(result).toEqual(responseData);
+        });
+        
+        it('should return error object when API call fails', async () => {
+            // Mock API error
+            const error = new Error('API error');
+            global.fetch.mockImplementation(() => Promise.reject(error));
+            
+            const secretId = 'test-secret-id';
+            const postId = 'test-post-id';
+            const result = await handleCloseSecret(secretId, postId)();
+            
+            expect(result).toEqual({ error: 'API error' });
         });
 
-        it('should handle non-OK responses with error message', async () => {
-            // Mock fetch to return a non-OK response with an error message
-            global.fetch = jest.fn().mockImplementation(() => Promise.resolve({
-                ok: false,
-                status: 404,
-                json: () => Promise.resolve({
-                    message: 'Secret not found',
-                }),
-            }));
-
-            const post = {
-                props: {
-                    secret_id: 'test-secret-id',
-                },
-            };
-
-            const result = await handleViewSecret(post)(jest.fn());
-            expect(result.error).toBeDefined();
-            expect(result.error.message).toContain('Failed to fetch secret: Secret not found');
-        });
-
-        it('should handle non-OK responses without error message', async () => {
-            // Mock fetch to return a non-OK response without an error message
-            global.fetch = jest.fn().mockImplementation(() => Promise.resolve({
-                ok: false,
-                status: 500,
-                json: () => Promise.resolve({}),
-            }));
-
-            const post = {
-                props: {
-                    secret_id: 'test-secret-id',
-                },
-            };
-
-            const result = await handleViewSecret(post)(jest.fn());
-            expect(result.error).toBeDefined();
-            expect(result.error.message).toContain('Failed to fetch secret: Status: 500');
+        it('should return error object when response is not OK', async () => {
+            // Mock non-OK response
+            global.fetch.mockImplementation(() => 
+                Promise.resolve({
+                    ok: false,
+                    status: 404,
+                    json: () => Promise.resolve({ message: 'Not found' }),
+                })
+            );
+            
+            const secretId = 'test-secret-id';
+            const postId = 'test-post-id';
+            const result = await handleCloseSecret(secretId, postId)();
+            
+            expect(result).toEqual({ error: 'HTTP error! status: 404' });
         });
     });
 }); 
