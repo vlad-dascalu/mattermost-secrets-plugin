@@ -1,7 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import {Client4} from 'mattermost-redux/client';
-
 import {id as pluginId} from '../manifest';
 
 export default class SecretPostType extends React.PureComponent {
@@ -45,8 +44,6 @@ export default class SecretPostType extends React.PureComponent {
         this.setState({loading: true, error: null});
 
         try {
-            console.log(`Attempting to view secret: ${secretId}`);
-            
             // Fetch the secret content - the server will respond with an ephemeral message
             const response = await fetch(`${Client4.getUrl()}/plugins/${pluginId}/api/v1/secrets/view?secret_id=${secretId}`, {
                 method: 'POST', // Use POST as required by the server
@@ -58,11 +55,9 @@ export default class SecretPostType extends React.PureComponent {
             });
 
             const responseData = await response.json();
-            console.log('Response from server:', responseData);
 
             if (!response.ok) {
                 const errorMessage = responseData.message || `Status: ${response.status}`;
-                console.error(`Failed to view secret: ${errorMessage}`);
                 throw new Error(`Failed to fetch secret: ${errorMessage}`);
             }
             
@@ -84,10 +79,7 @@ export default class SecretPostType extends React.PureComponent {
                     expired: true,
                 });
             }
-            
-            console.log('Secret view request processed, check for ephemeral messages');
         } catch (error) {
-            console.error('Error viewing secret:', error);
             this.setState({
                 error: error.message,
                 loading: false,

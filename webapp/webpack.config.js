@@ -13,7 +13,10 @@ module.exports = {
             "path": false,
             "fs": false,
             "crypto": false
-        }
+        },
+        alias: {
+            'react-intl': path.resolve(__dirname, 'src/tests/mocks/react-intl.js'),
+        },
     },
     module: {
         rules: [
@@ -69,5 +72,6 @@ module.exports = {
         'react-redux': 'ReactRedux',
         'prop-types': 'PropTypes',
         'react-bootstrap': 'ReactBootstrap',
+        'react-intl': 'ReactIntl',
     },
 }; 

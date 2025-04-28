@@ -1,20 +1,12 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import SecretPostType from '../../components/secret_post_type';
+import { SecretPostType } from '../../components/secret_post_type';
 import { handleViewSecret } from '../../actions';
-import { Client4 } from 'mattermost-redux/client';
 
 // Mock the actions
 jest.mock('../../actions', () => ({
     handleViewSecret: jest.fn(),
-}));
-
-// Mock the Client4.getUrl method
-jest.mock('mattermost-redux/client', () => ({
-    Client4: {
-        getUrl: jest.fn().mockReturnValue('http://localhost:8065'),
-    },
 }));
 
 // Mock fetch
