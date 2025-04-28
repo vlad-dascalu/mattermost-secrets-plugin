@@ -18,7 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v3
       with:
-        go-version: 1.18
+        go-version: '1.24'
       
     - name: Get dependencies
       run: |
@@ -76,7 +76,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v3
       with:
-        go-version: 1.18
+        go-version: '1.24'
       
     - name: Set up Node.js
       uses: actions/setup-node@v3
@@ -95,4 +95,5 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: plugin-package
-        path: dist/*.tar.gz 
+        path: dist/*.tar.gz
+        download-path: ./dist 
