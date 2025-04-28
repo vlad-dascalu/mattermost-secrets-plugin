@@ -211,6 +211,7 @@ func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
 			UserId:    p.botID,
 			ChannelId: secret.ChannelID,
 			Message:   "**This secret has expired and is no longer available.**",
+			RootId:    secret.RootId, // Include the RootId to make the ephemeral message appear in the thread
 		}
 		p.API.SendEphemeralPost(userID, expiredPost)
 
@@ -242,6 +243,7 @@ func (p *Plugin) handleViewSecret(w http.ResponseWriter, r *http.Request) {
 		UserId:    p.botID,
 		ChannelId: secret.ChannelID,
 		Message:   "**Secret Message**:\n```\n" + secret.Message + "\n```",
+		RootId:    secret.RootId, // Include the RootId to make the ephemeral message appear in the thread
 	}
 
 	p.API.SendEphemeralPost(userID, ephemeralPost)
