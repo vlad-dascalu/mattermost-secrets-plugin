@@ -75,7 +75,7 @@ For more detailed usage instructions, see the [User Guide](docs/user_guide.md).
 ### Prerequisites
 
 - Go 1.20 or later
-- Node.js 16.x or later
+- Node.js 18.x or later
 - npm 7.x or later
 
 ### Build Process
