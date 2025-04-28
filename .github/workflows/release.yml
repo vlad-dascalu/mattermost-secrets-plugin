@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Read plugin metadata
+        run: |
+          echo "PLUGIN_ID=$(jq -r .id plugin.json)" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Extract version from tag
+        run: |
+          echo "PLUGIN_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.24'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Build plugin distribution
+        run: make dist
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
+          body: Release ${{ github.ref_name }}
+          draft: true
+          prerelease: false
+
+      - name: Upload plugin package
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/${{ env.PLUGIN_ID }}-${{ env.PLUGIN_VERSION }}.tar.gz
+          asset_name: ${{ env.PLUGIN_ID }}-${{ env.PLUGIN_VERSION }}.tar.gz
+          asset_content_type: application/gzip
