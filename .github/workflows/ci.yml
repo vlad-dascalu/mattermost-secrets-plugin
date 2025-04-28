@@ -92,8 +92,7 @@ jobs:
       run: make build
       
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: plugin-package
-        path: dist/*.tar.gz
-        download-path: ./dist 
+        path: dist/*.tar.gz 
