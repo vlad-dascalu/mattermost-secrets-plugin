@@ -43,7 +43,7 @@ export function handleViewSecret(post) {
                 console.log('Action: Response from server:', responseData);
             } catch (e) {
                 console.error('Action: Failed to parse JSON response:', e);
-                responseData = {};
+                throw new Error('Failed to fetch secret: Invalid JSON response');
             }
 
             if (!response.ok) {

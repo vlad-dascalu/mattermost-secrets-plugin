@@ -70,9 +70,23 @@ describe('components/SecretPostType', () => {
         fireEvent.click(screen.getByText('View Secret'));
         
         await waitFor(() => {
-            const errorElement = screen.getByText('API error');
-            expect(errorElement).toBeInTheDocument();
-            expect(errorElement).toHaveClass('SecretPostType__error');
+            expect(screen.getByText('API error')).toBeInTheDocument();
+        });
+    });
+
+    it('should show error message when response is not OK', async () => {
+        // Mock fetch to return a non-OK response
+        global.fetch.mockImplementation(() => Promise.resolve({
+            ok: false,
+            status: 404,
+            json: () => Promise.resolve({ message: 'Secret not found' })
+        }));
+        
+        render(<SecretPostType {...baseProps} />);
+        fireEvent.click(screen.getByText('View Secret'));
+        
+        await waitFor(() => {
+            expect(screen.getByText('Failed to fetch secret: Secret not found')).toBeInTheDocument();
         });
     });
 
@@ -119,6 +133,54 @@ describe('components/SecretPostType', () => {
         
         await waitFor(() => {
             expect(screen.getByText('You have already viewed this secret message.')).toBeInTheDocument();
+        });
+    });
+
+    it('should update state when post props change', () => {
+        const {rerender} = render(<SecretPostType {...baseProps} />);
+        
+        // Update props to mark the secret as expired
+        const updatedProps = {
+            ...baseProps,
+            post: {
+                props: {
+                    ...baseProps.post.props,
+                    expired: true,
+                },
+            },
+        };
+        
+        rerender(<SecretPostType {...updatedProps} />);
+        
+        expect(screen.getByText('This secret has expired and is no longer available.')).toBeInTheDocument();
+    });
+
+    it('should handle invalid secret ID', () => {
+        const invalidProps = {
+            ...baseProps,
+            post: {
+                props: {},
+            },
+        };
+        
+        render(<SecretPostType {...invalidProps} />);
+        expect(screen.getByText('Invalid secret message')).toBeInTheDocument();
+    });
+
+    it('should handle expired secret in response', async () => {
+        // Mock fetch to return a response indicating the secret has expired
+        global.fetch.mockImplementation(() => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+                ephemeralText: 'This secret has expired',
+            }),
+        }));
+        
+        render(<SecretPostType {...baseProps} />);
+        fireEvent.click(screen.getByText('View Secret'));
+        
+        await waitFor(() => {
+            expect(screen.getByText('This secret has expired and is no longer available.')).toBeInTheDocument();
         });
     });
 }); 

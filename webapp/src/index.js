@@ -18,5 +18,8 @@ export default class Plugin {
     }
 }
 
-console.log(`Secrets plugin (${pluginId}) initialized`);
-window.registerPlugin(pluginId, new Plugin()); 
+// Only register the plugin if window.registerPlugin is available
+if (typeof window !== 'undefined' && window.registerPlugin) {
+    console.log(`Secrets plugin (${pluginId}) initialized`);
+    window.registerPlugin(pluginId, new Plugin());
+} 

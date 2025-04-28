@@ -120,5 +120,69 @@ describe('actions', () => {
             // Check error returned
             expect(result.error).toBe(error);
         });
+
+        it('should handle JSON parsing errors', async () => {
+            // Mock fetch to return a response that can't be parsed as JSON
+            global.fetch = jest.fn().mockImplementation(() => Promise.resolve({
+                ok: true,
+                json: () => {
+                    throw new Error('Invalid JSON');
+                },
+            }));
+
+            const post = {
+                props: {
+                    secret_id: 'test-secret-id',
+                },
+            };
+
+            const dispatch = jest.fn();
+            const result = await handleViewSecret(post)(dispatch);
+            
+            expect(result.error).toBeDefined();
+            expect(result.error.message).toContain('Failed to fetch secret');
+            expect(dispatch).not.toHaveBeenCalled();
+            expect(localStorageMock.setItem).not.toHaveBeenCalled();
+        });
+
+        it('should handle non-OK responses with error message', async () => {
+            // Mock fetch to return a non-OK response with an error message
+            global.fetch = jest.fn().mockImplementation(() => Promise.resolve({
+                ok: false,
+                status: 404,
+                json: () => Promise.resolve({
+                    message: 'Secret not found',
+                }),
+            }));
+
+            const post = {
+                props: {
+                    secret_id: 'test-secret-id',
+                },
+            };
+
+            const result = await handleViewSecret(post)(jest.fn());
+            expect(result.error).toBeDefined();
+            expect(result.error.message).toContain('Failed to fetch secret: Secret not found');
+        });
+
+        it('should handle non-OK responses without error message', async () => {
+            // Mock fetch to return a non-OK response without an error message
+            global.fetch = jest.fn().mockImplementation(() => Promise.resolve({
+                ok: false,
+                status: 500,
+                json: () => Promise.resolve({}),
+            }));
+
+            const post = {
+                props: {
+                    secret_id: 'test-secret-id',
+                },
+            };
+
+            const result = await handleViewSecret(post)(jest.fn());
+            expect(result.error).toBeDefined();
+            expect(result.error.message).toContain('Failed to fetch secret: Status: 500');
+        });
     });
 }); 
