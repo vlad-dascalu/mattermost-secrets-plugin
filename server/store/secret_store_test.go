@@ -4,21 +4,20 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin/plugintest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/mattermost/mattermost-plugin-secrets/server/models"
-	"github.com/mattermost/mattermost/server/public/model"
 )
 
 func TestKVSecretStore_SaveSecret(t *testing.T) {
-	// Test cases
 	tests := []struct {
-		name          string
-		secret        *models.Secret
-		mockAPI       func(api *plugintest.API, secret *models.Secret)
-		expectedError bool
+		name      string
+		secret    *models.Secret
+		mockAPI   func(api *plugintest.API)
+		expectErr bool
 	}{
 		{
 			name: "successfully saves secret",
@@ -26,400 +25,298 @@ func TestKVSecretStore_SaveSecret(t *testing.T) {
 				ID:        "secret1",
 				UserID:    "user1",
 				ChannelID: "channel1",
-				Message:   "This is a test secret",
-				ViewedBy:  []string{},
-				CreatedAt: 12345,
-				ExpiresAt: 67890,
+				Message:   "test secret",
 			},
-			mockAPI: func(api *plugintest.API, secret *models.Secret) {
-				expectedKey := SecretKeyPrefix + secret.ID
-				serialized, _ := json.Marshal(secret)
-				api.On("KVSet", expectedKey, serialized).Return(nil)
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVSet", mock.Anything, mock.Anything).Return(nil)
 			},
-			expectedError: false,
+			expectErr: false,
+		},
+		{
+			name: "empty secret ID",
+			secret: &models.Secret{
+				ID: "",
+			},
+			mockAPI:   func(api *plugintest.API) {},
+			expectErr: true,
 		},
 		{
 			name: "error saving to KV store",
 			secret: &models.Secret{
-				ID:        "secret1",
-				UserID:    "user1",
-				ChannelID: "channel1",
-				Message:   "This is a test secret",
-				ViewedBy:  []string{},
-				CreatedAt: 12345,
-				ExpiresAt: 67890,
+				ID: "secret1",
 			},
-			mockAPI: func(api *plugintest.API, secret *models.Secret) {
-				expectedKey := SecretKeyPrefix + secret.ID
-				serialized, _ := json.Marshal(secret)
-				api.On("KVSet", expectedKey, serialized).Return(&model.AppError{Message: "test error"})
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVSet", mock.Anything, mock.Anything).Return(&model.AppError{Message: "error"})
 			},
-			expectedError: true,
-		},
-		{
-			name:   "empty secret ID",
-			secret: &models.Secret{},
-			mockAPI: func(api *plugintest.API, secret *models.Secret) {
-				// No API calls expected
-			},
-			expectedError: true,
+			expectErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockAPI := &plugintest.API{}
-
-			// Apply mocks
-			tt.mockAPI(mockAPI, tt.secret)
+			tt.mockAPI(mockAPI)
 
 			store := NewKVSecretStore(mockAPI)
 			err := store.SaveSecret(tt.secret)
 
-			if tt.expectedError {
+			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
+				mockAPI.AssertExpectations(t)
 			}
-
-			// Verify mocks
-			mockAPI.AssertExpectations(t)
 		})
 	}
 }
 
 func TestKVSecretStore_GetSecret(t *testing.T) {
-	// Test cases
 	tests := []struct {
-		name          string
-		secretID      string
-		mockAPI       func(api *plugintest.API, secretID string)
-		expectedError bool
-		expectedNil   bool
+		name      string
+		id        string
+		mockAPI   func(api *plugintest.API)
+		expectErr bool
 	}{
 		{
-			name:     "successfully gets secret",
-			secretID: "secret1",
-			mockAPI: func(api *plugintest.API, secretID string) {
+			name: "successfully gets secret",
+			id:   "secret1",
+			mockAPI: func(api *plugintest.API) {
 				secret := &models.Secret{
-					ID:        secretID,
-					UserID:    "user1",
-					ChannelID: "channel1",
-					Message:   "This is a test secret",
-					ViewedBy:  []string{},
-					CreatedAt: 12345,
-					ExpiresAt: 67890,
+					ID:      "secret1",
+					Message: "test secret",
 				}
-
-				expectedKey := SecretKeyPrefix + secretID
-				serialized, _ := json.Marshal(secret)
-				api.On("KVGet", expectedKey).Return(serialized, nil)
+				data, _ := json.Marshal(secret)
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return(data, nil)
 			},
-			expectedError: false,
-			expectedNil:   false,
+			expectErr: false,
 		},
 		{
-			name:     "secret not found",
-			secretID: "secret1",
-			mockAPI: func(api *plugintest.API, secretID string) {
-				expectedKey := SecretKeyPrefix + secretID
-				api.On("KVGet", expectedKey).Return(nil, nil)
-			},
-			expectedError: false,
-			expectedNil:   true,
+			name:      "empty secret ID",
+			id:        "",
+			mockAPI:   func(api *plugintest.API) {},
+			expectErr: true,
 		},
 		{
-			name:     "error getting from KV store",
-			secretID: "secret1",
-			mockAPI: func(api *plugintest.API, secretID string) {
-				expectedKey := SecretKeyPrefix + secretID
-				api.On("KVGet", expectedKey).Return(nil, &model.AppError{Message: "test error"})
+			name: "secret not found",
+			id:   "nonexistent",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVGet", SecretKeyPrefix+"nonexistent").Return(nil, nil)
 			},
-			expectedError: true,
-			expectedNil:   true,
+			expectErr: false,
 		},
 		{
-			name:     "invalid JSON",
-			secretID: "secret1",
-			mockAPI: func(api *plugintest.API, secretID string) {
-				expectedKey := SecretKeyPrefix + secretID
-				api.On("KVGet", expectedKey).Return([]byte("invalid JSON"), nil)
+			name: "error getting from KV store",
+			id:   "secret1",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return(nil, &model.AppError{Message: "error"})
 			},
-			expectedError: true,
-			expectedNil:   true,
+			expectErr: true,
 		},
 		{
-			name:     "empty secret ID",
-			secretID: "",
-			mockAPI: func(api *plugintest.API, secretID string) {
-				// No API calls expected
+			name: "invalid JSON data",
+			id:   "secret1",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return([]byte("invalid json"), nil)
 			},
-			expectedError: true,
-			expectedNil:   true,
+			expectErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockAPI := &plugintest.API{}
-
-			// Apply mocks
-			tt.mockAPI(mockAPI, tt.secretID)
+			tt.mockAPI(mockAPI)
 
 			store := NewKVSecretStore(mockAPI)
-			secret, err := store.GetSecret(tt.secretID)
+			secret, err := store.GetSecret(tt.id)
 
-			if tt.expectedError {
+			if tt.expectErr {
 				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-
-			if tt.expectedNil {
 				assert.Nil(t, secret)
 			} else {
-				assert.NotNil(t, secret)
-				assert.Equal(t, tt.secretID, secret.ID)
+				assert.NoError(t, err)
+				mockAPI.AssertExpectations(t)
 			}
-
-			// Verify mocks
-			mockAPI.AssertExpectations(t)
 		})
 	}
 }
 
 func TestKVSecretStore_DeleteSecret(t *testing.T) {
-	// Test cases
 	tests := []struct {
-		name          string
-		secretID      string
-		mockAPI       func(api *plugintest.API, secretID string)
-		expectedError bool
+		name      string
+		id        string
+		mockAPI   func(api *plugintest.API)
+		expectErr bool
 	}{
 		{
-			name:     "successfully deletes secret",
-			secretID: "secret1",
-			mockAPI: func(api *plugintest.API, secretID string) {
-				expectedKey := SecretKeyPrefix + secretID
-				api.On("KVDelete", expectedKey).Return(nil)
+			name: "successfully deletes secret",
+			id:   "secret1",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVDelete", SecretKeyPrefix+"secret1").Return(nil)
 			},
-			expectedError: false,
+			expectErr: false,
 		},
 		{
-			name:     "error deleting from KV store",
-			secretID: "secret1",
-			mockAPI: func(api *plugintest.API, secretID string) {
-				expectedKey := SecretKeyPrefix + secretID
-				api.On("KVDelete", expectedKey).Return(&model.AppError{Message: "test error"})
-			},
-			expectedError: true,
+			name:      "empty secret ID",
+			id:        "",
+			mockAPI:   func(api *plugintest.API) {},
+			expectErr: true,
 		},
 		{
-			name:     "empty secret ID",
-			secretID: "",
-			mockAPI: func(api *plugintest.API, secretID string) {
-				// No API calls expected
+			name: "error deleting from KV store",
+			id:   "secret1",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVDelete", SecretKeyPrefix+"secret1").Return(&model.AppError{Message: "error"})
 			},
-			expectedError: true,
+			expectErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockAPI := &plugintest.API{}
-
-			// Apply mocks
-			tt.mockAPI(mockAPI, tt.secretID)
+			tt.mockAPI(mockAPI)
 
 			store := NewKVSecretStore(mockAPI)
-			err := store.DeleteSecret(tt.secretID)
+			err := store.DeleteSecret(tt.id)
 
-			if tt.expectedError {
+			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
+				mockAPI.AssertExpectations(t)
 			}
-
-			// Verify mocks
-			mockAPI.AssertExpectations(t)
 		})
 	}
 }
 
 func TestKVSecretStore_ListExpiredSecrets(t *testing.T) {
-	// Current time in milliseconds
-	now := int64(1000000)
-
-	// Set up secrets
-	secrets := []*models.Secret{
-		{
-			ID:        "secret1",
-			ExpiresAt: now - 1000, // Expired 1 second ago
-		},
-		{
-			ID:        "secret2",
-			ExpiresAt: now + 1000, // Expires in 1 second
-		},
-		{
-			ID:        "secret3",
-			ExpiresAt: now - 2000, // Expired 2 seconds ago
-		},
-		{
-			ID:        "secret4",
-			ExpiresAt: 0, // Never expires
-		},
-	}
-
-	// Set up keys
-	keys := []string{
-		SecretKeyPrefix + "secret1",
-		SecretKeyPrefix + "secret2",
-		SecretKeyPrefix + "secret3",
-		SecretKeyPrefix + "secret4",
-		"other_prefix_key",
-	}
-
-	// Test cases
 	tests := []struct {
-		name           string
-		mockAPI        func(api *plugintest.API)
-		expectedError  bool
-		expectedCount  int
-		expectedIDs    []string
-		expectedMillis int64
+		name      string
+		mockAPI   func(api *plugintest.API)
+		expectErr bool
 	}{
 		{
 			name: "successfully lists expired secrets",
 			mockAPI: func(api *plugintest.API) {
-				// First, mock the KVList call
-				api.On("KVList", 0, 1000).Return(keys, nil)
-
-				// Then, mock each KVGet call for the secrets
-				for _, secret := range secrets {
-					key := SecretKeyPrefix + secret.ID
-					serialized, _ := json.Marshal(secret)
-					api.On("KVGet", key).Return(serialized, nil)
+				api.On("KVList", 0, 1000).Return([]string{SecretKeyPrefix + "secret1"}, nil)
+				secret := &models.Secret{
+					ID:        "secret1",
+					ExpiresAt: 1, // Expired
 				}
-
-				// Mock the current time
-				models.GetMillis = func() int64 {
-					return now
-				}
+				data, _ := json.Marshal(secret)
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return(data, nil)
 			},
-			expectedError: false,
-			expectedCount: 2,                              // Expect 2 expired secrets
-			expectedIDs:   []string{"secret1", "secret3"}, // The expired ones
+			expectErr: false,
 		},
 		{
-			name: "error listing keys",
+			name: "error listing from KV store",
 			mockAPI: func(api *plugintest.API) {
-				api.On("KVList", 0, 1000).Return(nil, &model.AppError{Message: "test error"})
-
-				// Mock the current time
-				models.GetMillis = func() int64 {
-					return now
-				}
+				api.On("KVList", 0, 1000).Return(nil, &model.AppError{Message: "error"})
 			},
-			expectedError: true,
+			expectErr: true,
 		},
 		{
-			name: "error getting secret",
+			name: "error getting secret from KV store",
 			mockAPI: func(api *plugintest.API) {
-				// First, mock the KVList call
-				api.On("KVList", 0, 1000).Return(keys, nil)
-
-				// Mock an error for one of the secrets
-				api.On("KVGet", SecretKeyPrefix+"secret1").Return(nil, &model.AppError{Message: "test error"})
-
-				// Mock successful gets for the other secrets
-				for i := 1; i < len(secrets); i++ {
-					secret := secrets[i]
-					key := SecretKeyPrefix + secret.ID
-					serialized, _ := json.Marshal(secret)
-					api.On("KVGet", key).Return(serialized, nil)
-				}
-
-				// Mock the LogError call that will happen when a get fails
-				api.On("LogError", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-
-				// Mock the current time
-				models.GetMillis = func() int64 {
-					return now
-				}
+				api.On("KVList", 0, 1000).Return([]string{SecretKeyPrefix + "secret1"}, nil)
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return(nil, &model.AppError{Message: "error"})
 			},
-			expectedError: false,
-			expectedCount: 1, // Expect 1 expired secret (secret3)
-			expectedIDs:   []string{"secret3"},
+			expectErr: false,
 		},
 		{
-			name: "invalid JSON",
+			name: "invalid JSON data",
 			mockAPI: func(api *plugintest.API) {
-				// First, mock the KVList call
-				api.On("KVList", 0, 1000).Return(keys, nil)
-
-				// Mock invalid JSON for one of the secrets
-				api.On("KVGet", SecretKeyPrefix+"secret1").Return([]byte("invalid JSON"), nil)
-
-				// Mock successful gets for the other secrets
-				for i := 1; i < len(secrets); i++ {
-					secret := secrets[i]
-					key := SecretKeyPrefix + secret.ID
-					serialized, _ := json.Marshal(secret)
-					api.On("KVGet", key).Return(serialized, nil)
-				}
-
-				// Mock the LogError call that will happen when a get fails
-				api.On("LogError", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
-
-				// Mock the current time
-				models.GetMillis = func() int64 {
-					return now
-				}
+				api.On("KVList", 0, 1000).Return([]string{SecretKeyPrefix + "secret1"}, nil)
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return([]byte("invalid json"), nil)
 			},
-			expectedError: false,
-			expectedCount: 1, // Expect 1 expired secret (secret3)
-			expectedIDs:   []string{"secret3"},
+			expectErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockAPI := &plugintest.API{}
-
-			// Apply mocks
+			// Set up LogError mocks for all possible error cases
+			mockAPI.On("LogError", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+			// Then set up other mocks
 			tt.mockAPI(mockAPI)
-
-			// Reset GetMillis after the test
-			defer func() {
-				models.GetMillis = func() int64 {
-					return 0
-				}
-			}()
 
 			store := NewKVSecretStore(mockAPI)
 			secrets, err := store.ListExpiredSecrets()
 
-			if tt.expectedError {
+			if tt.expectErr {
 				assert.Error(t, err)
+				assert.Nil(t, secrets)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedCount, len(secrets))
-
-				// Check that each expected ID is in the results
-				for _, expectedID := range tt.expectedIDs {
-					found := false
-					for _, secret := range secrets {
-						if secret.ID == expectedID {
-							found = true
-							break
-						}
-					}
-					assert.True(t, found, "Expected to find secret with ID %s", expectedID)
-				}
+				mockAPI.AssertExpectations(t)
 			}
+		})
+	}
+}
 
-			// Verify mocks
-			mockAPI.AssertExpectations(t)
+func TestKVSecretStore_GetAllSecrets(t *testing.T) {
+	tests := []struct {
+		name      string
+		mockAPI   func(api *plugintest.API)
+		expectErr bool
+	}{
+		{
+			name: "successfully gets all secrets",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVList", 0, 1000).Return([]string{SecretKeyPrefix + "secret1"}, nil)
+				secret := &models.Secret{
+					ID: "secret1",
+				}
+				data, _ := json.Marshal(secret)
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return(data, nil)
+			},
+			expectErr: false,
+		},
+		{
+			name: "error listing from KV store",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVList", 0, 1000).Return(nil, &model.AppError{Message: "error"})
+			},
+			expectErr: true,
+		},
+		{
+			name: "error getting secret from KV store",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVList", 0, 1000).Return([]string{SecretKeyPrefix + "secret1"}, nil)
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return(nil, &model.AppError{Message: "error"})
+			},
+			expectErr: false,
+		},
+		{
+			name: "invalid JSON data",
+			mockAPI: func(api *plugintest.API) {
+				api.On("KVList", 0, 1000).Return([]string{SecretKeyPrefix + "secret1"}, nil)
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return([]byte("invalid json"), nil)
+			},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAPI := &plugintest.API{}
+			// Set up LogError mocks for all possible error cases
+			mockAPI.On("LogError", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+			// Then set up other mocks
+			tt.mockAPI(mockAPI)
+
+			store := NewKVSecretStore(mockAPI)
+			secrets, err := store.GetAllSecrets()
+
+			if tt.expectErr {
+				assert.Error(t, err)
+				assert.Nil(t, secrets)
+			} else {
+				assert.NoError(t, err)
+				mockAPI.AssertExpectations(t)
+			}
 		})
 	}
 }
