@@ -93,7 +93,7 @@ make dist
 
 ## Installing the Plugin
 
-After building, you'll have a file `dist/com.mattermost.secrets-plugin-0.1.0.tar.gz`. Upload this plugin to your Mattermost instance:
+After building, you'll have a file `dist/secrets-plugin-x.x.x.tar.gz`. Upload this plugin to your Mattermost instance:
 
 1. Go to **System Console > Plugins > Plugin Management**
 2. Upload the plugin file
