@@ -18,13 +18,14 @@ describe('reducers', () => {
                 type: 'RECEIVED_SECRET',
                 data: {
                     secretId: 'test-secret-id',
-                    message: 'This is a test secret',
+                    viewed: true,
+                    viewedAt: Date.now(),
                 },
             };
             
             const expectedState = {
                 secrets: {
-                    'test-secret-id': 'This is a test secret',
+                    'test-secret-id': true,
                 },
             };
             
@@ -34,7 +35,7 @@ describe('reducers', () => {
         it('should handle multiple secrets', () => {
             const initialState = {
                 secrets: {
-                    'existing-secret-id': 'Existing secret message',
+                    'existing-secret-id': true,
                 },
             };
             
@@ -42,14 +43,15 @@ describe('reducers', () => {
                 type: 'RECEIVED_SECRET',
                 data: {
                     secretId: 'new-secret-id',
-                    message: 'New secret message',
+                    viewed: true,
+                    viewedAt: Date.now(),
                 },
             };
             
             const expectedState = {
                 secrets: {
-                    'existing-secret-id': 'Existing secret message',
-                    'new-secret-id': 'New secret message',
+                    'existing-secret-id': true,
+                    'new-secret-id': true,
                 },
             };
             
@@ -59,7 +61,7 @@ describe('reducers', () => {
         it('should override existing secret with same ID', () => {
             const initialState = {
                 secrets: {
-                    'test-secret-id': 'Old secret message',
+                    'test-secret-id': true,
                 },
             };
             
@@ -67,13 +69,14 @@ describe('reducers', () => {
                 type: 'RECEIVED_SECRET',
                 data: {
                     secretId: 'test-secret-id',
-                    message: 'Updated secret message',
+                    viewed: true,
+                    viewedAt: Date.now(),
                 },
             };
             
             const expectedState = {
                 secrets: {
-                    'test-secret-id': 'Updated secret message',
+                    'test-secret-id': true,
                 },
             };
             
@@ -83,7 +86,7 @@ describe('reducers', () => {
         it('should ignore unknown actions', () => {
             const initialState = {
                 secrets: {
-                    'test-secret-id': 'Secret message',
+                    'test-secret-id': true,
                 },
             };
             

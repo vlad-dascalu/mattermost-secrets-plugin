@@ -1,24 +1,32 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-
 import SecretPostType from '../../components/secret_post_type';
+import { handleViewSecret } from '../../actions';
+import { Client4 } from 'mattermost-redux/client';
 
-// Mock fetchs
-global.fetch = jest.fn();
+// Mock the actions
+jest.mock('../../actions', () => ({
+    handleViewSecret: jest.fn(),
+}));
 
-// Mock Client4.getUrl()
+// Mock the Client4.getUrl method
 jest.mock('mattermost-redux/client', () => ({
     Client4: {
-        getUrl: jest.fn(() => 'http://localhost:8065'),
+        getUrl: jest.fn().mockReturnValue('http://localhost:8065'),
     },
 }));
 
-describe('SecretPostType', () => {
-    const defaultProps = {
+// Mock fetch
+global.fetch = jest.fn();
+
+describe('components/SecretPostType', () => {
+    const baseProps = {
         post: {
             props: {
                 secret_id: 'test-secret-id',
+                message: 'This is a test secret',
+                expires_at: Date.now() + 3600000, // 1 hour from now
             },
         },
         theme: {
@@ -28,87 +36,89 @@ describe('SecretPostType', () => {
             buttonBg: '#166de0',
             buttonColor: '#ffffff',
         },
+        actions: {
+            handleViewSecret,
+        },
     };
 
     beforeEach(() => {
-        fetch.mockClear();
-        fetch.mockImplementation(() => 
-            Promise.resolve({
-                ok: true,
-                json: () => Promise.resolve({ message: 'This is a secret message', allow_copy: true }),
-            })
-        );
+        handleViewSecret.mockClear();
+        localStorage.clear();
+        global.fetch.mockClear();
     });
 
-    it('should render initial view with button', () => {
-        render(<SecretPostType {...defaultProps} />);
-        
-        // Check that the button is rendered
+    it('should render correctly', () => {
+        render(<SecretPostType {...baseProps} />);
         expect(screen.getByText('View Secret')).toBeInTheDocument();
-        expect(screen.getByText('This message contains a secret. View it once, then it disappears.')).toBeInTheDocument();
     });
 
-    it('should show loading state when button is clicked', async () => {
-        render(<SecretPostType {...defaultProps} />);
+    it('should show loading state while fetching secret', async () => {
+        // Mock fetch to never resolve
+        global.fetch.mockImplementation(() => new Promise(() => {}));
         
-        // Click the button
+        render(<SecretPostType {...baseProps} />);
         fireEvent.click(screen.getByText('View Secret'));
         
-        // Should show loading state
         expect(screen.getByText('Loading secret message...')).toBeInTheDocument();
-        
-        // Wait for the fetch to complete
-        await waitFor(() => {
-            expect(fetch).toHaveBeenCalledTimes(1);
-        });
     });
 
-    it('should display secret content after loading', async () => {
-        render(<SecretPostType {...defaultProps} />);
+    it('should show error message when fetch fails', async () => {
+        // Mock fetch to reject with an error
+        global.fetch.mockImplementation(() => Promise.reject(new Error('API error')));
         
-        // Click the button
+        render(<SecretPostType {...baseProps} />);
         fireEvent.click(screen.getByText('View Secret'));
         
-        // Wait for the secret content to be displayed
         await waitFor(() => {
-            expect(screen.getByText('This is a secret message')).toBeInTheDocument();
-        });
-        
-        // Check that the copy button is displayed
-        expect(screen.getByRole('button')).toBeInTheDocument();
-    });
-
-    it('should handle errors', async () => {
-        // Mock a failed fetch
-        fetch.mockImplementationOnce(() => 
-            Promise.resolve({
-                ok: false,
-                status: 404,
-            })
-        );
-        
-        render(<SecretPostType {...defaultProps} />);
-        
-        // Click the button
-        fireEvent.click(screen.getByText('View Secret'));
-        
-        // Wait for the error message to be displayed
-        await waitFor(() => {
-            expect(screen.getByText(/Failed to fetch secret/)).toBeInTheDocument();
+            const errorElement = screen.getByText('API error');
+            expect(errorElement).toBeInTheDocument();
+            expect(errorElement).toHaveClass('SecretPostType__error');
         });
     });
 
-    it('should handle missing secret ID', () => {
-        const propsWithoutSecretId = {
-            ...defaultProps,
+    it('should show expired message when secret has expired', () => {
+        const expiredProps = {
+            ...baseProps,
             post: {
-                props: {},
+                props: {
+                    ...baseProps.post.props,
+                    expired: true,
+                },
             },
         };
         
-        render(<SecretPostType {...propsWithoutSecretId} />);
+        render(<SecretPostType {...expiredProps} />);
+        expect(screen.getByText('This secret has expired and is no longer available.')).toBeInTheDocument();
+    });
+
+    it('should show already viewed message when secret was previously viewed', () => {
+        const secretId = baseProps.post.props.secret_id;
+        const viewedAt = Date.now() - 1000;
+        localStorage.setItem(`secret_viewed_${secretId}`, viewedAt.toString());
         
-        // Should show an error message
-        expect(screen.getByText('Invalid secret message')).toBeInTheDocument();
+        render(<SecretPostType {...baseProps} />);
+        expect(screen.getByText('You have already viewed this secret message.')).toBeInTheDocument();
+    });
+
+    it('should show initial message before viewing secret', () => {
+        render(<SecretPostType {...baseProps} />);
+        expect(screen.getByText('This message contains a secret. View it once, then it disappears.')).toBeInTheDocument();
+    });
+
+    it('should show viewed message after successful fetch', async () => {
+        // Mock fetch to return a successful response
+        global.fetch.mockImplementation(() => Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+                ephemeralText: 'Secret content',
+            }),
+        }));
+        
+        render(<SecretPostType {...baseProps} />);
+        fireEvent.click(screen.getByText('View Secret'));
+        
+        await waitFor(() => {
+            expect(screen.getByText('You have already viewed this secret message.')).toBeInTheDocument();
+        });
     });
 }); 

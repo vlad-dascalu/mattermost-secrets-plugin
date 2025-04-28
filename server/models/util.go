@@ -5,6 +5,6 @@ import (
 )
 
 // GetMillis returns the current time in milliseconds
-func GetMillis() int64 {
+var GetMillis = func() int64 {
 	return time.Now().UnixNano() / int64(time.Millisecond)
 }

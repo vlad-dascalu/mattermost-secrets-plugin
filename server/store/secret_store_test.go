@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/mattermost/mattermost/server/public/plugin/plugintest"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/mattermost/mattermost-plugin-secrets/server/models"
+	"github.com/mattermost/mattermost/server/public/model"
 )
 
 func TestKVSecretStore_SaveSecret(t *testing.T) {
@@ -52,7 +52,7 @@ func TestKVSecretStore_SaveSecret(t *testing.T) {
 			mockAPI: func(api *plugintest.API, secret *models.Secret) {
 				expectedKey := SecretKeyPrefix + secret.ID
 				serialized, _ := json.Marshal(secret)
-				api.On("KVSet", expectedKey, serialized).Return(errors.New("test error"))
+				api.On("KVSet", expectedKey, serialized).Return(&model.AppError{Message: "test error"})
 			},
 			expectedError: true,
 		},
@@ -133,7 +133,7 @@ func TestKVSecretStore_GetSecret(t *testing.T) {
 			secretID: "secret1",
 			mockAPI: func(api *plugintest.API, secretID string) {
 				expectedKey := SecretKeyPrefix + secretID
-				api.On("KVGet", expectedKey).Return(nil, errors.New("test error"))
+				api.On("KVGet", expectedKey).Return(nil, &model.AppError{Message: "test error"})
 			},
 			expectedError: true,
 			expectedNil:   true,
@@ -210,7 +210,7 @@ func TestKVSecretStore_DeleteSecret(t *testing.T) {
 			secretID: "secret1",
 			mockAPI: func(api *plugintest.API, secretID string) {
 				expectedKey := SecretKeyPrefix + secretID
-				api.On("KVDelete", expectedKey).Return(errors.New("test error"))
+				api.On("KVDelete", expectedKey).Return(&model.AppError{Message: "test error"})
 			},
 			expectedError: true,
 		},
@@ -313,7 +313,7 @@ func TestKVSecretStore_ListExpiredSecrets(t *testing.T) {
 		{
 			name: "error listing keys",
 			mockAPI: func(api *plugintest.API) {
-				api.On("KVList", 0, 1000).Return(nil, errors.New("test error"))
+				api.On("KVList", 0, 1000).Return(nil, &model.AppError{Message: "test error"})
 
 				// Mock the current time
 				models.GetMillis = func() int64 {
@@ -329,7 +329,7 @@ func TestKVSecretStore_ListExpiredSecrets(t *testing.T) {
 				api.On("KVList", 0, 1000).Return(keys, nil)
 
 				// Mock an error for one of the secrets
-				api.On("KVGet", SecretKeyPrefix+"secret1").Return(nil, errors.New("test error"))
+				api.On("KVGet", SecretKeyPrefix+"secret1").Return(nil, &model.AppError{Message: "test error"})
 
 				// Mock successful gets for the other secrets
 				for i := 1; i < len(secrets); i++ {
@@ -340,7 +340,7 @@ func TestKVSecretStore_ListExpiredSecrets(t *testing.T) {
 				}
 
 				// Mock the LogError call that will happen when a get fails
-				api.On("LogError", mock.Anything, mock.Anything, mock.Anything).Return()
+				api.On("LogError", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 				// Mock the current time
 				models.GetMillis = func() int64 {
@@ -369,7 +369,7 @@ func TestKVSecretStore_ListExpiredSecrets(t *testing.T) {
 				}
 
 				// Mock the LogError call that will happen when a get fails
-				api.On("LogError", mock.Anything, mock.Anything, mock.Anything).Return()
+				api.On("LogError", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return()
 
 				// Mock the current time
 				models.GetMillis = func() int64 {

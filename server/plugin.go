@@ -633,6 +633,11 @@ func (p *Plugin) createSecret(userID, channelID, message string, rootID string) 
 
 // markSecretAsViewed marks a secret as viewed by a user
 func (p *Plugin) markSecretAsViewed(secret *models.Secret, userID string) error {
+	// Check if secret is nil
+	if secret == nil {
+		return errors.New("secret not found")
+	}
+
 	p.API.LogDebug("Marking secret as viewed", "secret_id", secret.ID, "user_id", userID)
 
 	// Check if the user has already viewed the secret
