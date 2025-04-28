@@ -1,4 +1,4 @@
-module github.com/mattermost/mattermost-plugin-secrets/server
+module github.com/vlad-dascalu/mattermost-secrets-plugin/server
 
 go 1.23.0
 

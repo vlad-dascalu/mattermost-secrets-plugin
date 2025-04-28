@@ -13,8 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/mattermost/mattermost-plugin-secrets/server/models"
-	"github.com/mattermost/mattermost-plugin-secrets/server/store"
+	"github.com/vlad-dascalu/mattermost-secrets-plugin/server/models"
+	"github.com/vlad-dascalu/mattermost-secrets-plugin/server/store"
 )
 
 func setupTestPlugin(t *testing.T, mockSecretStore store.SecretStore) *Plugin {

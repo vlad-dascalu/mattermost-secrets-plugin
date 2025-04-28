@@ -6,7 +6,7 @@ import (
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/pkg/errors"
 
-	"github.com/mattermost/mattermost-plugin-secrets/server/models"
+	"github.com/vlad-dascalu/mattermost-secrets-plugin/server/models"
 )
 
 const (

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/mattermost/mattermost-plugin-secrets/server/models"
+	"github.com/vlad-dascalu/mattermost-secrets-plugin/server/models"
 )
 
 func TestKVSecretStore_SaveSecret(t *testing.T) {

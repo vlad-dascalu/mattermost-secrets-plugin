@@ -12,8 +12,8 @@ import (
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/pkg/errors"
 
-	"github.com/mattermost/mattermost-plugin-secrets/server/models"
-	"github.com/mattermost/mattermost-plugin-secrets/server/store"
+	"github.com/vlad-dascalu/mattermost-secrets-plugin/server/models"
+	"github.com/vlad-dascalu/mattermost-secrets-plugin/server/store"
 )
 
 // Plugin implements the interface expected by the Mattermost server to communicate between the server and plugin processes.
