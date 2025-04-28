@@ -2,10 +2,9 @@ import {id as pluginId} from './manifest';
 import Root from './components/root';
 import SecretPostType from './components/secret_post_type';
 
-// Register the plugin
 export default class Plugin {
     // eslint-disable-next-line no-unused-vars
-    async initialize(registry, store) {
+    initialize(registry, store) {
         try {
             // Register the root component
             registry.registerRootComponent(Root);
@@ -13,25 +12,10 @@ export default class Plugin {
             // Register a custom post type for secret messages
             registry.registerPostTypeComponent('custom_secret', SecretPostType);
             
-            // Register the message watcher
-            registry.registerMessageWillBePostedHook(
-                (post) => {
-                    try {
-                        // Process the message
-                        return {post, error: null};
-                    } catch (error) {
-                        return {
-                            post,
-                            error: {
-                                message: 'Failed to process message',
-                                id: pluginId,
-                            },
-                        };
-                    }
-                }
-            );
+            // Note: registerPostAction is no longer supported in newer Mattermost versions
+            // We'll handle view actions directly in the SecretPostType component
         } catch (error) {
-            // Handle error appropriately
+            console.error('Error initializing secrets plugin:', error);
         }
     }
 }
@@ -41,5 +25,5 @@ if (typeof window !== 'undefined' && window.registerPlugin) {
     window.registerPlugin(pluginId, new Plugin());
 }
 
-// Export the plugin
+// Export the plugin id
 export const id = pluginId; 
