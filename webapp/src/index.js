@@ -1,8 +1,6 @@
 import {id as pluginId} from './manifest';
 import Root from './components/root';
 import SecretPostType from './components/secret_post_type';
-// Import handler for consistent imports, even though we won't register it as a post action
-import {handleViewSecret} from './actions';
 
 export default class Plugin {
     // eslint-disable-next-line no-unused-vars
