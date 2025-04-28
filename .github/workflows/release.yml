@@ -27,8 +27,10 @@ jobs:
         shell: bash
 
       - name: Extract version from tag
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          echo "PLUGIN_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+          echo "PLUGIN_VERSION=${RELEASE_TAG#v}" >> $GITHUB_ENV
         shell: bash
 
       - name: Set up Go
