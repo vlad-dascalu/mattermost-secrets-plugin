@@ -1,5 +1,5 @@
 {
-    "id": "com.mattermost.secrets-plugin",
+    "id": "secrets-plugin",
     "name": "Secrets Plugin",
     "description": "A plugin for sending secret messages that can only be viewed once.",
     "homepage_url": "https://github.com/mattermost/mattermost-plugin-secrets",

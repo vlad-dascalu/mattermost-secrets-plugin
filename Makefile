@@ -1,6 +1,6 @@
 .PHONY: all dist build clean test server webapp
 
-PLUGIN_ID ?= com.mattermost.secrets-plugin
+PLUGIN_ID ?= secrets-plugin
 PLUGIN_VERSION ?= 0.1.0
 BUNDLE_NAME ?= $(PLUGIN_ID)-$(PLUGIN_VERSION).tar.gz
 

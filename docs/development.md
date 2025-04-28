@@ -44,7 +44,7 @@ The plugin exposes the following REST API endpoints:
 ### Create Secret
 
 ```
-POST /plugins/com.mattermost.secrets-plugin/api/v1/secrets
+POST /plugins/secrets-plugin/api/v1/secrets
 ```
 
 Request body:
@@ -70,7 +70,7 @@ Response:
 ### Mark Secret as Viewed
 
 ```
-POST /plugins/com.mattermost.secrets-plugin/api/v1/secrets/viewed
+POST /plugins/secrets-plugin/api/v1/secrets/viewed
 ```
 
 Request body:
